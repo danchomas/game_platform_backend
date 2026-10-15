@@ -1,35 +1,36 @@
-// Package collector — буферизованный приём событий аналитики.
-// HTTP-обработчик только кладёт событие в канал (O(1)), а пачки пишутся в Postgres через COPY.
 package collector
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Event struct {
-	GameID, SessionID, PlayerID, Type, Result string
-	Score                                     *float64
-	DurationMs                                *int64
-	Payload                                   []byte
+	GameID     string
+	SessionID  string
+	PlayerID   string
+	Type       string
+	Result     string
+	Score      *float64
+	DurationMs *int64
+	Payload    []byte
 }
 
 type Collector struct {
-	db      *sql.DB
+	pool    *pgxpool.Pool
 	ch      chan Event
 	Dropped atomic.Int64
 }
 
-func New(db *sql.DB, buffer int) *Collector {
-	return &Collector{db: db, ch: make(chan Event, buffer)}
+func New(pool *pgxpool.Pool, buffer int) *Collector {
+	return &Collector{pool: pool, ch: make(chan Event, buffer)}
 }
 
-// Add не блокируется: при переполнении события отбрасываются (и считаются).
 func (c *Collector) Add(e Event) {
 	select {
 	case c.ch <- e:
@@ -43,11 +44,11 @@ const (
 	interval = 500 * time.Millisecond
 )
 
-// Run работает до отмены ctx, затем дописывает остаток.
 func (c *Collector) Run(ctx context.Context) {
 	batch := make([]Event, 0, maxBatch)
 	t := time.NewTicker(interval)
 	defer t.Stop()
+
 	flush := func() {
 		if len(batch) == 0 {
 			return
@@ -59,6 +60,7 @@ func (c *Collector) Run(ctx context.Context) {
 		}
 		batch = batch[:0]
 	}
+
 	for {
 		select {
 		case e := <-c.ch:
@@ -69,6 +71,7 @@ func (c *Collector) Run(ctx context.Context) {
 		case <-t.C:
 			flush()
 		case <-ctx.Done():
+			// Дописываем остатки при gracefully shutdown
 			for {
 				select {
 				case e := <-c.ch:
@@ -83,49 +86,54 @@ func (c *Collector) Run(ctx context.Context) {
 }
 
 func (c *Collector) write(ctx context.Context, batch []Event) error {
-	tx, err := c.db.BeginTx(ctx, nil)
+	tx, err := c.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
-	stmt, err := tx.PrepareContext(ctx, pq.CopyIn("events",
-		"game_id", "session_id", "player_id", "type", "result", "score", "duration_ms", "payload"))
-	if err != nil {
-		return err
-	}
+	rows := make([][]any, 0, len(batch))
 	plays := map[string]int64{}
+
 	for _, e := range batch {
 		var payload any
 		if len(e.Payload) > 0 {
 			payload = string(e.Payload)
 		}
-		if _, err := stmt.ExecContext(ctx, e.GameID, e.SessionID, e.PlayerID, e.Type, e.Result,
-			e.Score, e.DurationMs, payload); err != nil {
-			return err
-		}
+		rows = append(rows, []any{
+			e.GameID, e.SessionID, e.PlayerID, e.Type, e.Result, e.Score, e.DurationMs, payload,
+		})
 		if e.Type == "session_start" {
 			plays[e.GameID]++
 		}
 	}
-	if _, err := stmt.ExecContext(ctx); err != nil {
+
+	// pgx CopyFrom — очень быстрый метод массовой вставки
+	_, err = tx.CopyFrom(ctx,
+		pgx.Identifier{"events"},
+		[]string{"game_id", "session_id", "player_id", "type", "result", "score", "duration_ms", "payload"},
+		pgx.CopyFromRows(rows),
+	)
+	if err != nil {
 		return err
 	}
-	if err := stmt.Close(); err != nil {
-		return err
-	}
+
+	// Обновляем счетчик plays
 	if len(plays) > 0 {
 		ids := make([]string, 0, len(plays))
 		cnt := make([]int64, 0, len(plays))
 		for id, n := range plays {
-			ids, cnt = append(ids, id), append(cnt, n)
+			ids = append(ids, id)
+			cnt = append(cnt, n)
 		}
-		if _, err := tx.ExecContext(ctx,
+		_, err = tx.Exec(ctx,
 			`UPDATE games g SET plays = g.plays + d.c
 			 FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS c) d WHERE g.id = d.id`,
-			pq.Array(ids), pq.Array(cnt)); err != nil {
+			ids, cnt)
+		if err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+
+	return tx.Commit(ctx)
 }

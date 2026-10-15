@@ -1,5 +1,5 @@
 // Package auth — минимальный JWT (HS256) на стандартной библиотеке.
-package auth
+package jwt
 
 import (
 	"crypto/hmac"
