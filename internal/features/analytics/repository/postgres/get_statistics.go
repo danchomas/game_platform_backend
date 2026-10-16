@@ -1,51 +1,11 @@
-package store
+package postgres
 
 import (
+	"beeline-games/internal/core/domain"
 	"context"
-	"database/sql"
-	"time"
 )
 
-// Зарезервированные типы событий, которые шлёт SDK автоматически.
 const reservedTypes = `'session_start','engaged','game_start','game_end','session_end'`
-
-type Filter struct {
-	OwnerID string // "" = без фильтра по владельцу
-	GameID  string // "" = все игры
-	From    time.Time
-	To      time.Time
-}
-
-func ns(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
-
-type Summary struct {
-	Sessions         int64   `json:"sessions"`
-	Players          int64   `json:"players"`
-	ReturningPlayers int64   `json:"returning_players"`
-	Engaged          int64   `json:"engaged_sessions"`
-	Starts           int64   `json:"game_starts"`
-	Ends             int64   `json:"game_ends"`
-	Wins             int64   `json:"wins"`
-	Losses           int64   `json:"losses"`
-	AvgSessionSec    float64 `json:"avg_session_sec"`
-	AvgScore         float64 `json:"avg_score"`
-	MaxScore         float64 `json:"max_score"`
-	EngagementRate   float64 `json:"engagement_rate"` // доля сессий с реальным взаимодействием
-	CompletionRate   float64 `json:"completion_rate"` // доля начатых партий, дошедших до конца
-	WinRate          float64 `json:"win_rate"`
-}
-
-func (s *Summary) derive() {
-	if s.Sessions > 0 {
-		s.EngagementRate = float64(s.Engaged) / float64(s.Sessions)
-	}
-	if s.Starts > 0 {
-		s.CompletionRate = float64(s.Ends) / float64(s.Starts)
-	}
-	if s.Ends > 0 {
-		s.WinRate = float64(s.Wins) / float64(s.Ends)
-	}
-}
 
 const aggCols = `
   count(DISTINCT e.session_id) FILTER (WHERE e.type='session_start'),
@@ -59,25 +19,26 @@ const aggCols = `
   coalesce(avg(e.score) FILTER (WHERE e.type='game_end'),0),
   coalesce(max(e.score) FILTER (WHERE e.type='game_end'),0)`
 
-func scanAgg(sc interface{ Scan(...any) error }, pre ...any) (Summary, error) {
-	var m Summary
+const scope = `e.ts >= $1 AND e.ts < $2 AND ($3::uuid IS NULL OR g.owner_id = $3::uuid) AND ($4::uuid IS NULL OR e.game_id = $4::uuid)`
+
+func scanAgg(sc interface{ Scan(...any) error }, pre ...any) (domain.Summary, error) {
+	var m domain.Summary
 	dest := append(pre, &m.Sessions, &m.Players, &m.Engaged, &m.Starts, &m.Ends, &m.Wins, &m.Losses,
 		&m.AvgSessionSec, &m.AvgScore, &m.MaxScore)
 	err := sc.Scan(dest...)
-	m.derive()
+	m.Derive()
 	return m, err
 }
 
-const scope = `e.ts >= $1 AND e.ts < $2 AND ($3::uuid IS NULL OR g.owner_id = $3::uuid) AND ($4::uuid IS NULL OR e.game_id = $4::uuid)`
-
-func (s *Store) Summary(ctx context.Context, f Filter) (Summary, error) {
-	m, err := scanAgg(s.DB.QueryRowContext(ctx,
+func (r *repository) Summary(ctx context.Context, f domain.Filter) (domain.Summary, error) {
+	m, err := scanAgg(r.pool.QueryRow(ctx,
 		`SELECT `+aggCols+` FROM events e JOIN games g ON g.id=e.game_id WHERE `+scope,
 		f.From, f.To, ns(f.OwnerID), ns(f.GameID)))
 	if err != nil {
 		return m, err
 	}
-	err = s.DB.QueryRowContext(ctx,
+
+	err = r.pool.QueryRow(ctx,
 		`SELECT count(*) FROM (
 		   SELECT e.player_id FROM events e JOIN games g ON g.id=e.game_id
 		   WHERE e.type='session_start' AND e.player_id<>'' AND `+scope+`
@@ -86,16 +47,8 @@ func (s *Store) Summary(ctx context.Context, f Filter) (Summary, error) {
 	return m, err
 }
 
-type DayPoint struct {
-	Day      string `json:"day"`
-	Sessions int64  `json:"sessions"`
-	Starts   int64  `json:"game_starts"`
-	Wins     int64  `json:"wins"`
-	Losses   int64  `json:"losses"`
-}
-
-func (s *Store) Daily(ctx context.Context, f Filter) ([]DayPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+func (r *repository) Daily(ctx context.Context, f domain.Filter) ([]domain.DayPoint, error) {
+	rows, err := r.pool.Query(ctx, `
 	  WITH days AS (
 	    SELECT generate_series(date_trunc('day',$1::timestamptz), date_trunc('day',$2::timestamptz - interval '1 microsecond'), interval '1 day') AS d),
 	  agg AS (
@@ -112,9 +65,10 @@ func (s *Store) Daily(ctx context.Context, f Filter) ([]DayPoint, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []DayPoint{}
+
+	var out []domain.DayPoint
 	for rows.Next() {
-		var p DayPoint
+		var p domain.DayPoint
 		if err := rows.Scan(&p.Day, &p.Sessions, &p.Starts, &p.Wins, &p.Losses); err != nil {
 			return nil, err
 		}
@@ -123,18 +77,8 @@ func (s *Store) Daily(ctx context.Context, f Filter) ([]DayPoint, error) {
 	return out, rows.Err()
 }
 
-type GameRow struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Genre     string `json:"genre"`
-	Published bool   `json:"published"`
-	Plays     int64  `json:"plays_total"`
-	Summary
-}
-
-// PerGame — таблица «игры × метрики» для дашборда.
-func (s *Store) PerGame(ctx context.Context, f Filter) ([]GameRow, error) {
-	rows, err := s.DB.QueryContext(ctx,
+func (r *repository) PerGame(ctx context.Context, f domain.Filter) ([]domain.GameRow, error) {
+	rows, err := r.pool.Query(ctx,
 		`SELECT g.id,g.title,g.genre,g.published,g.plays,`+aggCols+`
 		 FROM games g LEFT JOIN events e ON e.game_id=g.id AND e.ts>=$1 AND e.ts<$2
 		 WHERE g.version>0 AND ($3::uuid IS NULL OR g.owner_id=$3::uuid) AND (g.published OR $3::uuid IS NOT NULL)
@@ -144,28 +88,22 @@ func (s *Store) PerGame(ctx context.Context, f Filter) ([]GameRow, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []GameRow{}
+
+	var out []domain.GameRow
 	for rows.Next() {
-		var r GameRow
-		m, err := scanAgg(rows, &r.ID, &r.Title, &r.Genre, &r.Published, &r.Plays)
+		var row domain.GameRow
+		m, err := scanAgg(rows, &row.ID, &row.Title, &row.Genre, &row.Published, &row.Plays)
 		if err != nil {
 			return nil, err
 		}
-		r.Summary = m
-		out = append(out, r)
+		row.Summary = m
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
 
-type EventCount struct {
-	Type     string `json:"type"`
-	Count    int64  `json:"count"`
-	Sessions int64  `json:"sessions"`
-}
-
-// CustomEvents — кастомные события, которые игра шлёт через GameSDK.event(...)
-func (s *Store) CustomEvents(ctx context.Context, f Filter) ([]EventCount, error) {
-	rows, err := s.DB.QueryContext(ctx,
+func (r *repository) CustomEvents(ctx context.Context, f domain.Filter) ([]domain.EventCount, error) {
+	rows, err := r.pool.Query(ctx,
 		`SELECT e.type, count(*), count(DISTINCT e.session_id)
 		 FROM events e JOIN games g ON g.id=e.game_id
 		 WHERE e.type NOT IN (`+reservedTypes+`) AND `+scope+`
@@ -175,9 +113,10 @@ func (s *Store) CustomEvents(ctx context.Context, f Filter) ([]EventCount, error
 		return nil, err
 	}
 	defer rows.Close()
-	out := []EventCount{}
+
+	var out []domain.EventCount
 	for rows.Next() {
-		var c EventCount
+		var c domain.EventCount
 		if err := rows.Scan(&c.Type, &c.Count, &c.Sessions); err != nil {
 			return nil, err
 		}
@@ -186,14 +125,8 @@ func (s *Store) CustomEvents(ctx context.Context, f Filter) ([]EventCount, error
 	return out, rows.Err()
 }
 
-// DurationBuckets — гистограмма длительности сессий (сек).
-type Bucket struct {
-	Label string `json:"label"`
-	Count int64  `json:"count"`
-}
-
-func (s *Store) DurationBuckets(ctx context.Context, f Filter) ([]Bucket, error) {
-	rows, err := s.DB.QueryContext(ctx,
+func (r *repository) DurationBuckets(ctx context.Context, f domain.Filter) ([]domain.Bucket, error) {
+	rows, err := r.pool.Query(ctx,
 		`SELECT CASE WHEN e.duration_ms < 10000 THEN '0-10s'
 		             WHEN e.duration_ms < 30000 THEN '10-30s'
 		             WHEN e.duration_ms < 60000 THEN '30-60s'
@@ -208,9 +141,10 @@ func (s *Store) DurationBuckets(ctx context.Context, f Filter) ([]Bucket, error)
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Bucket{}
+
+	var out []domain.Bucket
 	for rows.Next() {
-		var b Bucket
+		var b domain.Bucket
 		var min int64
 		if err := rows.Scan(&b.Label, &b.Count, &min); err != nil {
 			return nil, err
@@ -220,31 +154,22 @@ func (s *Store) DurationBuckets(ctx context.Context, f Filter) ([]Bucket, error)
 	return out, rows.Err()
 }
 
-// ---------- инсайты для промпта LLM ----------
-
-type Insight struct {
-	Title, Genre, Audience string
-	Sessions               int64
-	AvgSessionSec          float64
-	WinRate                float64
-}
-
-// TopInsights — самые «залипательные» опубликованные игры за 30 дней.
-func (s *Store) TopInsights(ctx context.Context, limit int) ([]Insight, error) {
-	rows, err := s.DB.QueryContext(ctx,
+func (r *repository) TopInsights(ctx context.Context, limit int) ([]domain.Insight, error) {
+	rows, err := r.pool.Query(ctx,
 		`SELECT g.title,g.genre,g.audience,`+aggCols+`
 		 FROM games g JOIN events e ON e.game_id=g.id
 		 WHERE g.published AND e.ts > now() - interval '30 days'
 		 GROUP BY g.id
 		 HAVING count(DISTINCT e.session_id) FILTER (WHERE e.type='session_start') >= 3
-		 ORDER BY 11 DESC LIMIT $1`, limit) // 11-я колонка = avg_session_sec
+		 ORDER BY 11 DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Insight{}
+
+	var out []domain.Insight
 	for rows.Next() {
-		var in Insight
+		var in domain.Insight
 		m, err := scanAgg(rows, &in.Title, &in.Genre, &in.Audience)
 		if err != nil {
 			return nil, err
