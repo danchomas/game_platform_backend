@@ -19,7 +19,6 @@
   }
   var sid = rid(), pid = playerId();
 
-  // активное (видимое) время сессии
   var active = 0, last = Date.now(), vis = !document.hidden;
   function acc() { var n = Date.now(); if (vis) active += n - last; last = n; vis = !document.hidden; }
 
@@ -50,7 +49,7 @@
   }
 
   push("session_start");
-  var t = setInterval(flush, 5000); // не теряем события, если WebView убьют без pagehide
+  var t = setInterval(flush, 5000);
   ["pointerdown", "touchstart", "keydown", "mousedown"].forEach(function (ev) {
     window.addEventListener(ev, function () { if (!engaged) { engaged = true; push("engaged"); } }, { passive: true, capture: true });
   });
