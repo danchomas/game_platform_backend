@@ -11,12 +11,10 @@ type contextKey string
 
 const claimsKey contextKey = "jwt_claims"
 
-// ContextWithClaims кладет данные токена в контекст
 func ContextWithClaims(ctx context.Context, claims jwt.Claims) context.Context {
 	return context.WithValue(ctx, claimsKey, claims)
 }
 
-// UserID достает ID пользователя из контекста запроса
 func UserID(r *http.Request) (string, bool) {
 	claims, ok := r.Context().Value(claimsKey).(jwt.Claims)
 	if !ok {
@@ -25,7 +23,6 @@ func UserID(r *http.Request) (string, bool) {
 	return claims.Sub, true
 }
 
-// Role достает роль пользователя из контекста
 func Role(r *http.Request) (string, bool) {
 	claims, ok := r.Context().Value(claimsKey).(jwt.Claims)
 	if !ok {

@@ -19,14 +19,14 @@ func NewHandler(svc service.Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMW func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /g/{id}", h.Play) // authMW не вешаем, так как он публичный (или использует ?token=)
+	mux.HandleFunc("GET /g/{id}", h.Play)
 	mux.HandleFunc("GET /api/games/{id}/export", authMW(h.Export))
 	mux.HandleFunc("POST /api/events", h.Events)
 }
 
 func (h *Handler) Play(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	userID, _ := request.UserID(r) // Достаем ID, если передан ?token=
+	userID, _ := request.UserID(r)
 
 	html, published, err := h.svc.GetPlayableHTML(r.Context(), userID, id)
 	if err != nil {

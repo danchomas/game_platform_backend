@@ -4,7 +4,7 @@ import "beeline-games/internal/core/domain"
 
 type gameDTO struct {
 	domain.Game
-	PlayURL string `json:"play_url"`
+	PlayURL	string	`json:"play_url"`
 }
 
 func toDTO(g domain.Game, publicBaseURL string) gameDTO {

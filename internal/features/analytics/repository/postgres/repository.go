@@ -24,7 +24,6 @@ func NewRepository(pool *pgxpool.Pool) Repository {
 	return &repository{pool: pool}
 }
 
-// Хелпер для pgx, чтобы передавать NULL, если строка пустая
 func ns(s string) *string {
 	if s == "" {
 		return nil

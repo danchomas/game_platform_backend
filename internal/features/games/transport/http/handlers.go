@@ -13,7 +13,7 @@ import (
 
 func (h *Handler) GetGame(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// Попытка достать ID, если передан токен, но не падаем, если его нет (аноним)
+
 	userID, _ := request.UserID(r)
 
 	g, err := h.svc.GetGame(r.Context(), userID, id)
@@ -147,13 +147,12 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, map[string]any{
-		"game":    toDTO(game, h.publicBaseURL),
-		"reply":   reply,
-		"version": version,
+		"game":		toDTO(game, h.publicBaseURL),
+		"reply":	reply,
+		"version":	version,
 	})
 }
 
-// helpers
 func handleCRUDErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, coreErrs.ErrNotFound) {
 		response.Error(w, http.StatusNotFound, "не найдено")

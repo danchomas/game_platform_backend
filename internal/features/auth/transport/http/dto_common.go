@@ -1,9 +1,9 @@
 package http
 
 type registerReq struct {
-	Name        string `json:"name"`
-	Role        string `json:"role"`
-	ManagerCode string `json:"manager_code"`
+	Name		string	`json:"name"`
+	Role		string	`json:"role"`
+	ManagerCode	string	`json:"manager_code"`
 }
 
 type loginReq struct {

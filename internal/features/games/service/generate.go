@@ -11,9 +11,8 @@ import (
 
 var errBusy = errors.New("сервер занят генерациями, попробуйте через минуту")
 
-// generate - внутренняя функция оркестрации LLM и базы
 func (s *service) generate(ctx context.Context, g domain.Game, userText string) (int, error) {
-	// 1. Очередь (семафор)
+
 	select {
 	case s.genSem <- struct{}{}:
 		defer func() { <-s.genSem }()
@@ -23,7 +22,6 @@ func (s *service) generate(ctx context.Context, g domain.Game, userText string) 
 		return 0, ctx.Err()
 	}
 
-	// 2. Получаем историю чата
 	hist, err := s.repo.Messages(ctx, g.ID)
 	if err != nil {
 		return 0, err
@@ -34,14 +32,12 @@ func (s *service) generate(ctx context.Context, g domain.Game, userText string) 
 		llmHist = append(llmHist, llm.Msg{Role: m.Role, Content: m.Content})
 	}
 
-	// 3. Формируем промпт (подмешивая аналитику)
 	hint := ""
 	if s.insights != nil {
 		hint = s.insights.GetInsightsHint(ctx)
 	}
 	msgs := llm.BuildMessages(hint, llmHist, g.HTML, userText)
 
-	// 4. Поход в LLM с ретраем
 	var res llm.Result
 	for attempt := 0; attempt < 2; attempt++ {
 		lctx, cancel := context.WithTimeout(ctx, s.llmTimeout)
@@ -58,9 +54,8 @@ func (s *service) generate(ctx context.Context, g domain.Game, userText string) 
 		}
 	}
 
-	// 5. Сохраняем версию в БД
 	return s.repo.AddVersion(ctx, domain.VersionInput{
-		GameID: g.ID, UserText: userText, Reply: res.Reply, HTML: res.HTML,
-		Title: res.Title, Genre: res.Genre, Audience: res.Audience,
+		GameID:	g.ID, UserText: userText, Reply: res.Reply, HTML: res.HTML,
+		Title:	res.Title, Genre: res.Genre, Audience: res.Audience,
 	})
 }

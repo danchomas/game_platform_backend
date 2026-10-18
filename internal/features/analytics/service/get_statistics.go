@@ -11,7 +11,6 @@ import (
 	coreErrs "beeline-games/internal/core/errors"
 )
 
-// par выполняет функции параллельно
 func par(fns ...func() error) error {
 	var wg sync.WaitGroup
 	errs := make([]error, len(fns))
@@ -69,7 +68,7 @@ func (s *service) GetOverview(ctx context.Context, userID, role, scope string, d
 }
 
 func (s *service) GetGameAnalytics(ctx context.Context, userID, role, gameID string, days int) (DashboardData, error) {
-	// Примечание: в идеале проверка владельца должна быть в GamesService, но для простоты мы допускаем проверку тут (либо в Transport)
+
 	from, to := dateRange(days)
 	f := domain.Filter{From: from, To: to, GameID: gameID}
 
@@ -88,7 +87,6 @@ func (s *service) GetGameAnalytics(ctx context.Context, userID, role, gameID str
 	return data, nil
 }
 
-// GetInsightsHint используется модулем Games для подмешивания в промпт
 func (s *service) GetInsightsHint(ctx context.Context) string {
 	s.hintMu.Lock()
 	defer s.hintMu.Unlock()

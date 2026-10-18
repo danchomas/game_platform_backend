@@ -18,7 +18,7 @@ func (r *repository) CreateGame(ctx context.Context, ownerID, prompt string) (st
 }
 
 func (r *repository) AddVersion(ctx context.Context, in domain.VersionInput) (int, error) {
-	// Начинаем транзакцию pgx
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, err

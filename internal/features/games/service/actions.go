@@ -10,7 +10,6 @@ import (
 	coreErrs "beeline-games/internal/core/errors"
 )
 
-// Helper: проверяет права владельца
 func (s *service) getOwnedGame(ctx context.Context, userID, gameID string) (domain.Game, error) {
 	g, err := s.repo.GetGame(ctx, gameID)
 	if err != nil {
@@ -27,7 +26,7 @@ func (s *service) GetGame(ctx context.Context, userID, gameID string) (domain.Ga
 	if err != nil {
 		return g, err
 	}
-	// Черновики доступны только владельцу
+
 	if !g.Published && g.OwnerID != userID {
 		return g, coreErrs.ErrNotFound
 	}
@@ -74,7 +73,7 @@ func (s *service) PublishGame(ctx context.Context, userID, gameID string, publis
 		return g, err
 	}
 	if publish && g.Version == 0 {
-		return g, coreErrs.ErrInvalidInput // В игре ещё нет сгенерированного кода
+		return g, coreErrs.ErrInvalidInput
 	}
 
 	if err := s.repo.SetPublished(ctx, gameID, publish); err != nil {
@@ -111,9 +110,9 @@ func (s *service) RestoreVersion(ctx context.Context, userID, gameID string, ver
 
 	reply := fmt.Sprintf("Восстановлена версия %d.", version)
 	newVer, err := s.repo.AddVersion(ctx, domain.VersionInput{
-		GameID: gameID,
-		Reply:  reply,
-		HTML:   html,
+		GameID:	gameID,
+		Reply:	reply,
+		HTML:	html,
 	})
 	if err != nil {
 		return g, "", 0, err

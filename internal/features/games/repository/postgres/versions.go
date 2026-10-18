@@ -21,7 +21,7 @@ func (r *repository) Messages(ctx context.Context, gameID string) ([]domain.Mess
 	var out []domain.Message
 	for rows.Next() {
 		var m domain.Message
-		var v *int32 // pgx работает с указателями для NULL
+		var v *int32
 		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &v, &m.CreatedAt); err != nil {
 			return nil, err
 		}

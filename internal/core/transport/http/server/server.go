@@ -21,46 +21,43 @@ import (
 	"beeline-games/internal/store"
 )
 
-//go:embed sdk.js
 var sdkJS string
 
 type Server struct {
-	cfg    config.Config
-	st     *store.Store
-	llm    *llm.Client
-	col    *collector.Collector
-	genSem chan struct{}
+	cfg	config.Config
+	st	*store.Store
+	llm	*llm.Client
+	col	*collector.Collector
+	genSem	chan struct{}
 
-	inflight sync.Map // gameID -> struct{}: не даём гонять две генерации одной игры
+	inflight	sync.Map
 
-	pubMu    sync.RWMutex
-	pubCache map[string]pubEntry
+	pubMu		sync.RWMutex
+	pubCache	map[string]pubEntry
 
-	hintMu  sync.Mutex
-	hint    string
-	hintExp time.Time
+	hintMu	sync.Mutex
+	hint	string
+	hintExp	time.Time
 }
 
 type pubEntry struct {
-	ok  bool
-	exp time.Time
+	ok	bool
+	exp	time.Time
 }
 
 func New(cfg config.Config, st *store.Store, l *llm.Client, col *collector.Collector) *Server {
 	return &Server{cfg: cfg, st: st, llm: l, col: col,
-		genSem: make(chan struct{}, cfg.MaxConcurrentGen), pubCache: map[string]pubEntry{}}
+		genSem:	make(chan struct{}, cfg.MaxConcurrentGen), pubCache: map[string]pubEntry{}}
 }
 
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", s.health)
 
-	// auth
 	m.HandleFunc("POST /api/auth/register", s.register)
 	m.HandleFunc("POST /api/auth/login", s.login)
 	m.HandleFunc("GET /api/me", s.authed(s.me))
 
-	// игры и чат
 	m.HandleFunc("POST /api/games", s.authed(s.createGame))
 	m.HandleFunc("GET /api/games/mine", s.authed(s.myGames))
 	m.HandleFunc("GET /api/games/{id}", s.getGame)
@@ -75,11 +72,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/games/{id}/export", s.authed(s.export))
 	m.HandleFunc("GET /api/gallery", s.gallery)
 
-	// раздача игры (WebView) и приём событий
 	m.HandleFunc("GET /g/{id}", s.play)
 	m.HandleFunc("POST /api/events", s.events)
 
-	// аналитика
 	m.HandleFunc("GET /api/analytics/overview", s.authed(s.overview))
 	m.HandleFunc("GET /api/analytics/games/{id}", s.authed(s.gameAnalytics))
 
@@ -89,8 +84,6 @@ func (s *Server) Handler() http.Handler {
 	}
 	return recoverMW(logMW(corsMW(gzipMW(m))))
 }
-
-// ---------- helpers ----------
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -166,17 +159,15 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, p)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(s.cfg.WebDir, "index.html")) // SPA fallback
+	http.ServeFile(w, r, filepath.Join(s.cfg.WebDir, "index.html"))
 }
-
-// ---------- middleware ----------
 
 type statusWriter struct {
 	http.ResponseWriter
-	code int
+	code	int
 }
 
-func (w *statusWriter) WriteHeader(c int) { w.code = c; w.ResponseWriter.WriteHeader(c) }
+func (w *statusWriter) WriteHeader(c int)	{ w.code = c; w.ResponseWriter.WriteHeader(c) }
 
 func recoverMW(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +194,6 @@ func logMW(next http.Handler) http.Handler {
 	})
 }
 
-// CORS: токен передаётся в заголовке (не в cookie), поэтому «*» безопасен и удобен для WebView/dev-фронта.
 func corsMW(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -223,8 +213,8 @@ var gzPool = sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
 
 type gzWriter struct {
 	http.ResponseWriter
-	zw          *gzip.Writer
-	wroteHeader bool
+	zw		*gzip.Writer
+	wroteHeader	bool
 }
 
 func (g *gzWriter) WriteHeader(code int) {

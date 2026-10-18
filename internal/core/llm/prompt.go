@@ -30,7 +30,6 @@ Call start() at round start (not on page load) and end() exactly once per round.
 
 WHEN MODIFYING AN EXISTING GAME: you receive the current full source inside <game> tags and a change request. Apply ONLY the requested changes, keep everything else working, and return the COMPLETE updated file (never diffs, never placeholders like "rest of the code").`
 
-// System собирает системный промпт; hint — необязательный блок аналитики по удачным прошлым играм.
 func System(hint string) string {
 	if strings.TrimSpace(hint) == "" {
 		return systemPrompt
@@ -38,7 +37,6 @@ func System(hint string) string {
 	return systemPrompt + "\n\nPLATFORM ANALYTICS (real data from published games; use the successful mechanics as inspiration where they fit the request, do not copy blindly):\n" + hint
 }
 
-// BuildMessages: system + короткая история чата + текущий код (если есть) + новый запрос.
 func BuildMessages(hint string, history []Msg, currentHTML, userText string) []Msg {
 	msgs := []Msg{{Role: "system", Content: System(hint)}}
 	if len(history) > 12 {

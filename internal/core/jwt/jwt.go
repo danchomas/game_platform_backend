@@ -1,4 +1,3 @@
-// Package auth — минимальный JWT (HS256) на стандартной библиотеке.
 package jwt
 
 import (
@@ -14,9 +13,9 @@ import (
 var ErrInvalid = errors.New("invalid token")
 
 type Claims struct {
-	Sub  string `json:"sub"`
-	Role string `json:"role"`
-	Exp  int64  `json:"exp"`
+	Sub	string	`json:"sub"`
+	Role	string	`json:"role"`
+	Exp	int64	`json:"exp"`
 }
 
 var header = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))

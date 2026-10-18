@@ -11,20 +11,20 @@ import (
 )
 
 type Event struct {
-	GameID     string
-	SessionID  string
-	PlayerID   string
-	Type       string
-	Result     string
-	Score      *float64
-	DurationMs *int64
-	Payload    []byte
+	GameID		string
+	SessionID	string
+	PlayerID	string
+	Type		string
+	Result		string
+	Score		*float64
+	DurationMs	*int64
+	Payload		[]byte
 }
 
 type Collector struct {
-	pool    *pgxpool.Pool
-	ch      chan Event
-	Dropped atomic.Int64
+	pool	*pgxpool.Pool
+	ch	chan Event
+	Dropped	atomic.Int64
 }
 
 func New(pool *pgxpool.Pool, buffer int) *Collector {
@@ -40,8 +40,8 @@ func (c *Collector) Add(e Event) {
 }
 
 const (
-	maxBatch = 1000
-	interval = 500 * time.Millisecond
+	maxBatch	= 1000
+	interval	= 500 * time.Millisecond
 )
 
 func (c *Collector) Run(ctx context.Context) {
@@ -71,7 +71,7 @@ func (c *Collector) Run(ctx context.Context) {
 		case <-t.C:
 			flush()
 		case <-ctx.Done():
-			// Дописываем остатки при gracefully shutdown
+
 			for {
 				select {
 				case e := <-c.ch:
@@ -108,7 +108,6 @@ func (c *Collector) write(ctx context.Context, batch []Event) error {
 		}
 	}
 
-	// pgx CopyFrom — очень быстрый метод массовой вставки
 	_, err = tx.CopyFrom(ctx,
 		pgx.Identifier{"events"},
 		[]string{"game_id", "session_id", "player_id", "type", "result", "score", "duration_ms", "payload"},
@@ -118,7 +117,6 @@ func (c *Collector) write(ctx context.Context, batch []Event) error {
 		return err
 	}
 
-	// Обновляем счетчик plays
 	if len(plays) > 0 {
 		ids := make([]string, 0, len(plays))
 		cnt := make([]int64, 0, len(plays))

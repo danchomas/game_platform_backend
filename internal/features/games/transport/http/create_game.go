@@ -38,15 +38,15 @@ func (h *Handler) CreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusCreated, map[string]any{
-		"game":    game, // TODO: обернуть в DTO, если нужно скрыть поля
-		"reply":   reply,
-		"version": version,
+		"game":		game,
+		"reply":	reply,
+		"version":	version,
 	})
 }
 
 func (h *Handler) IterateGame(w http.ResponseWriter, r *http.Request) {
 	userID, _ := request.UserID(r)
-	gameID := r.PathValue("id") // фича Go 1.22
+	gameID := r.PathValue("id")
 
 	var in chatReq
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -57,7 +57,7 @@ func (h *Handler) IterateGame(w http.ResponseWriter, r *http.Request) {
 
 	game, reply, version, err := h.svc.IterateGame(r.Context(), userID, gameID, in.Content)
 	if err != nil {
-		if errors.Is(err, coreErrs.ErrForbidden) && game.ID == "" { // Хак для проверки "занято"
+		if errors.Is(err, coreErrs.ErrForbidden) && game.ID == "" {
 			response.Error(w, http.StatusConflict, "для этой игры уже идёт генерация")
 			return
 		}
@@ -66,9 +66,9 @@ func (h *Handler) IterateGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, map[string]any{
-		"game":    game,
-		"reply":   reply,
-		"version": version,
+		"game":		game,
+		"reply":	reply,
+		"version":	version,
 	})
 }
 

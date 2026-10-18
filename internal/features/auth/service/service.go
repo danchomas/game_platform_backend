@@ -13,15 +13,15 @@ type Service interface {
 }
 
 type service struct {
-	repo        postgres.Repository
-	jwtSecret   string
-	managerCode string
+	repo		postgres.Repository
+	jwtSecret	string
+	managerCode	string
 }
 
 func NewService(repo postgres.Repository, jwtSecret, managerCode string) Service {
 	return &service{
-		repo:        repo,
-		jwtSecret:   jwtSecret,
-		managerCode: managerCode,
+		repo:		repo,
+		jwtSecret:	jwtSecret,
+		managerCode:	managerCode,
 	}
 }

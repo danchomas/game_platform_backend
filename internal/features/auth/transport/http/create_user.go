@@ -9,7 +9,7 @@ import (
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var in registerReq
-	// Ограничиваем размер тела (1 MB)
+
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		apiErr(w, http.StatusBadRequest, "некорректный JSON")

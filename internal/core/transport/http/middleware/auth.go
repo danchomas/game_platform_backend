@@ -14,7 +14,6 @@ func Auth(secret string) func(http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
-			// Поддержка передачи токена в query для превью игр (iframe)
 			if tok == "" {
 				tok = r.URL.Query().Get("token")
 			}
@@ -30,7 +29,6 @@ func Auth(secret string) func(http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			// Кладем claims в контекст и идем дальше
 			ctx := request.ContextWithClaims(r.Context(), claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		}

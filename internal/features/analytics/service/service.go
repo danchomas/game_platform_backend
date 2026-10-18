@@ -10,13 +10,13 @@ import (
 )
 
 type DashboardData struct {
-	Scope           string              `json:"scope"`
-	Days            int                 `json:"days"`
-	Summary         domain.Summary      `json:"summary"`
-	Daily           []domain.DayPoint   `json:"daily"`
-	Games           []domain.GameRow    `json:"games,omitempty"`
-	CustomEvents    []domain.EventCount `json:"custom_events"`
-	SessionDuration []domain.Bucket     `json:"session_duration"`
+	Scope		string			`json:"scope"`
+	Days		int			`json:"days"`
+	Summary		domain.Summary		`json:"summary"`
+	Daily		[]domain.DayPoint	`json:"daily"`
+	Games		[]domain.GameRow	`json:"games,omitempty"`
+	CustomEvents	[]domain.EventCount	`json:"custom_events"`
+	SessionDuration	[]domain.Bucket		`json:"session_duration"`
 }
 
 type Service interface {
@@ -26,10 +26,10 @@ type Service interface {
 }
 
 type service struct {
-	repo    postgres.Repository
-	hintMu  sync.Mutex
-	hint    string
-	hintExp time.Time
+	repo	postgres.Repository
+	hintMu	sync.Mutex
+	hint	string
+	hintExp	time.Time
 }
 
 func NewService(repo postgres.Repository) Service {

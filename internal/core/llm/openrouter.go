@@ -1,4 +1,3 @@
-// Package llm — клиент OpenRouter и разбор ответа модели.
 package llm
 
 import (
@@ -16,13 +15,13 @@ import (
 )
 
 type Msg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role	string	`json:"role"`
+	Content	string	`json:"content"`
 }
 
 type Client struct {
-	Key, Model, URL string
-	HTTP            *http.Client
+	Key, Model, URL	string
+	HTTP		*http.Client
 }
 
 func NewClient(key, model, endpoint, proxyStr string, timeout time.Duration) *Client {
@@ -49,10 +48,10 @@ func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
 		return "", ErrNoKey
 	}
 	body, _ := json.Marshal(map[string]any{
-		"model":       c.Model,
-		"messages":    msgs,
-		"max_tokens":  8000,
-		"temperature": 0.7,
+		"model":	c.Model,
+		"messages":	msgs,
+		"max_tokens":	8000,
+		"temperature":	0.7,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
 	if err != nil {
@@ -74,14 +73,14 @@ func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
 		return "", err
 	}
 	var out struct {
-		Choices []struct {
+		Choices	[]struct {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
-		} `json:"choices"`
-		Error *struct {
+		}	`json:"choices"`
+		Error	*struct {
 			Message string `json:"message"`
-		} `json:"error"`
+		}	`json:"error"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", fmt.Errorf("openrouter: HTTP %d, не JSON: %.200s", resp.StatusCode, raw)
@@ -95,8 +94,6 @@ func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
 	return out.Choices[0].Message.Content, nil
 }
 
-// ---------- разбор ответа ----------
-
 type Result struct {
 	Reply, HTML, Title, Genre, Audience string
 }
@@ -109,7 +106,7 @@ func between(s, open, close string) (string, bool) {
 	i += len(open)
 	j := strings.LastIndex(s, close)
 	if j < i {
-		// закрывающий тег не пришёл (обрыв по лимиту токенов)
+
 		return strings.TrimSpace(s[i:]), false
 	}
 	return strings.TrimSpace(s[i:j]), true
@@ -141,7 +138,7 @@ func Parse(raw string) (Result, error) {
 	}
 	game, closed := between(raw, "<game>", "</game>")
 	if game == "" {
-		// запасной вариант: html в markdown-блоке или «голый» документ
+
 		if i := strings.Index(raw, "```html"); i >= 0 {
 			game = stripFence(raw[i:])
 			closed = true

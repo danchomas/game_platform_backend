@@ -21,13 +21,12 @@ func (s *service) CreateAndGenerate(ctx context.Context, ownerID, prompt string)
 		return domain.Game{}, "", 0, err
 	}
 
-	// Блокируем параллельные генерации для одной игры
 	s.inflight.Store(id, true)
 	defer s.inflight.Delete(id)
 
 	v, err := s.generate(ctx, domain.Game{ID: id}, prompt)
 	if err != nil {
-		_ = s.repo.DeleteGame(context.WithoutCancel(ctx), id) // удаляем пустой черновик при сбое
+		_ = s.repo.DeleteGame(context.WithoutCancel(ctx), id)
 		return domain.Game{}, "", 0, err
 	}
 
@@ -50,7 +49,7 @@ func (s *service) IterateGame(ctx context.Context, userID, gameID, instruction s
 	}
 
 	if _, busy := s.inflight.LoadOrStore(g.ID, true); busy {
-		return domain.Game{}, "", 0, coreErrs.ErrForbidden // В HTTP отдадим 409 Conflict
+		return domain.Game{}, "", 0, coreErrs.ErrForbidden
 	}
 	defer s.inflight.Delete(g.ID)
 
@@ -63,7 +62,6 @@ func (s *service) IterateGame(ctx context.Context, userID, gameID, instruction s
 	return updatedGame, getLatestReply(ctx, s.repo, gameID), v, err
 }
 
-// helper
 func getLatestReply(ctx context.Context, repo postgres.Repository, gameID string) string {
 	msgs, err := repo.Messages(ctx, gameID)
 	if err != nil || len(msgs) == 0 {

@@ -9,9 +9,9 @@ import (
 
 func (r *repository) SaveUser(ctx context.Context, name, role, accessKey string) (domain.User, error) {
 	u := domain.User{
-		ID:   uuid.NewString(),
-		Name: name,
-		Role: role,
+		ID:	uuid.NewString(),
+		Name:	name,
+		Role:	role,
 	}
 
 	err := r.pool.QueryRow(ctx,

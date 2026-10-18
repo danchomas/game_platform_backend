@@ -36,7 +36,6 @@ func (h *Handler) GameAnalytics(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 	days := qInt(r, "days", 30, 1, 365)
 
-	// Проверяем права через модуль Games (если не менеджер)
 	if role != "manager" {
 		isOwner, err := h.games.CheckOwnership(r.Context(), userID, gameID)
 		if err != nil || !isOwner {

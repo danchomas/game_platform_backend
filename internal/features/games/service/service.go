@@ -39,21 +39,21 @@ type Service interface {
 }
 
 type service struct {
-	repo       postgres.Repository
-	llm        LLMProvider
-	insights   InsightProvider
-	llmTimeout time.Duration
+	repo		postgres.Repository
+	llm		LLMProvider
+	insights	InsightProvider
+	llmTimeout	time.Duration
 
-	genSem   chan struct{}
-	inflight sync.Map
+	genSem		chan struct{}
+	inflight	sync.Map
 }
 
 func NewService(repo postgres.Repository, llmProv LLMProvider, insights InsightProvider, maxConcurrent int, llmTimeout time.Duration) Service {
 	return &service{
-		repo:       repo,
-		llm:        llmProv,
-		insights:   insights,
-		llmTimeout: llmTimeout,
-		genSem:     make(chan struct{}, maxConcurrent),
+		repo:		repo,
+		llm:		llmProv,
+		insights:	insights,
+		llmTimeout:	llmTimeout,
+		genSem:		make(chan struct{}, maxConcurrent),
 	}
 }

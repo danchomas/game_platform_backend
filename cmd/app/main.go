@@ -36,7 +36,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Инициализация Базы Данных
 	pool, err := pgx.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to connect to database", "err", err)
@@ -44,7 +43,6 @@ func main() {
 	}
 	defer pool.Close()
 
-	// 2. Инициализация Core компонентов
 	llmClient := llm.NewClient(cfg.OpenRouterKey, cfg.OpenRouterModel, cfg.OpenRouterURL, cfg.ProxyURL, cfg.LLMTimeout+10*time.Second)
 
 	eventCollector := collector.New(pool, 100_000)
@@ -54,19 +52,15 @@ func main() {
 		close(colDone)
 	}()
 
-	// 3. Инициализация Репозиториев
 	aRepo := authRepo.NewRepository(pool)
 	gRepo := gamesRepo.NewRepository(pool)
 	anRepo := analyticsRepo.NewRepository(pool)
 
-	// 4. Инициализация Сервисов (Бизнес-логика)
-	// Внедряем зависимости через интерфейсы!
 	aSvc := authSvc.NewService(aRepo, cfg.JWTSecret, cfg.ManagerCode)
 	anSvc := analyticsSvc.NewService(anRepo)
 	gSvc := gamesSvc.NewService(gRepo, llmClient, anSvc, cfg.MaxConcurrentGen, cfg.LLMTimeout)
 	pSvc := playSvc.NewService(gSvc, eventCollector, cfg.PublicBaseURL)
 
-	// 5. Инициализация HTTP Хендлеров
 	mux := http.ServeMux{}
 	authMW := middleware.Auth(cfg.JWTSecret)
 
@@ -76,13 +70,12 @@ func main() {
 	gamesHandler := gamesHttp.NewHandler(gSvc, cfg.PublicBaseURL)
 	gamesHandler.RegisterRoutes(&mux, authMW)
 
-	analyticsHandler := analyticsHttp.NewHandler(anSvc, gSvc) // gSvc проверяет права владельца игры
+	analyticsHandler := analyticsHttp.NewHandler(anSvc, gSvc)
 	analyticsHandler.RegisterRoutes(&mux, authMW)
 
 	playHandler := playHttp.NewHandler(pSvc)
 	playHandler.RegisterRoutes(&mux, authMW)
 
-	// Healthcheck
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := pool.Ping(r.Context()); err != nil {
 			http.Error(w, "db down", http.StatusServiceUnavailable)
@@ -92,15 +85,13 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// 6. Настройка и запуск HTTP сервера (добавляем базовые миддлвари: CORS и т.д., если они есть)
-	// Для простоты здесь запускаем напрямую mux. В продакшене оберните в Logger/CORS
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           &mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      cfg.LLMTimeout + 30*time.Second,
-		IdleTimeout:       120 * time.Second,
+		Addr:			cfg.Addr,
+		Handler:		&mux,
+		ReadHeaderTimeout:	10 * time.Second,
+		ReadTimeout:		30 * time.Second,
+		WriteTimeout:		cfg.LLMTimeout + 30*time.Second,
+		IdleTimeout:		120 * time.Second,
 	}
 
 	go func() {
@@ -111,7 +102,6 @@ func main() {
 		}
 	}()
 
-	// 7. Graceful Shutdown
 	<-ctx.Done()
 	slog.Info("shutting down gracefully...")
 
@@ -119,6 +109,6 @@ func main() {
 	defer cancel()
 
 	_ = srv.Shutdown(shutdownCtx)
-	<-colDone // Ждем, пока Collector допишет события в БД
+	<-colDone
 	slog.Info("shutdown complete")
 }

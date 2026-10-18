@@ -15,7 +15,6 @@ import (
 	coreErrs "beeline-games/internal/core/errors"
 )
 
-//go:embed sdk.js
 var sdkJS string
 
 var headRe = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
@@ -31,18 +30,18 @@ type CollectorProvider interface {
 }
 
 type EventIn struct {
-	Type       string          `json:"type"`
-	Result     string          `json:"result"`
-	Score      *float64        `json:"score"`
-	DurationMs *int64          `json:"duration_ms"`
-	Payload    json.RawMessage `json:"payload"`
+	Type		string		`json:"type"`
+	Result		string		`json:"result"`
+	Score		*float64	`json:"score"`
+	DurationMs	*int64		`json:"duration_ms"`
+	Payload		json.RawMessage	`json:"payload"`
 }
 
 type BatchIn struct {
-	GameID    string    `json:"game_id"`
-	SessionID string    `json:"session_id"`
-	PlayerID  string    `json:"player_id"`
-	Events    []EventIn `json:"events"`
+	GameID		string		`json:"game_id"`
+	SessionID	string		`json:"session_id"`
+	PlayerID	string		`json:"player_id"`
+	Events		[]EventIn	`json:"events"`
 }
 
 type Service interface {
@@ -51,25 +50,25 @@ type Service interface {
 }
 
 type service struct {
-	games         GamesProvider
-	collector     CollectorProvider
-	publicBaseURL string
+	games		GamesProvider
+	collector	CollectorProvider
+	publicBaseURL	string
 
-	pubMu    sync.RWMutex
-	pubCache map[string]pubEntry
+	pubMu		sync.RWMutex
+	pubCache	map[string]pubEntry
 }
 
 type pubEntry struct {
-	ok  bool
-	exp time.Time
+	ok	bool
+	exp	time.Time
 }
 
 func NewService(games GamesProvider, col CollectorProvider, publicBaseURL string) Service {
 	return &service{
-		games:         games,
-		collector:     col,
-		publicBaseURL: publicBaseURL,
-		pubCache:      make(map[string]pubEntry),
+		games:		games,
+		collector:	col,
+		publicBaseURL:	publicBaseURL,
+		pubCache:	make(map[string]pubEntry),
 	}
 }
 
@@ -81,7 +80,7 @@ func (s *service) GetPlayableHTML(ctx context.Context, userID, gameID string) (s
 	if g.HTML == "" {
 		return "", false, coreErrs.ErrNotFound
 	}
-	// Если черновик и мы не владелец — 404 (в GetGame уже есть базовая проверка, но дублируем для надежности)
+
 	if !g.Published && g.OwnerID != userID {
 		return "", false, coreErrs.ErrNotFound
 	}
@@ -112,9 +111,8 @@ func (s *service) ProcessEvents(ctx context.Context, batch BatchIn) error {
 		return coreErrs.ErrInvalidInput
 	}
 
-	// Проверяем, опубликована ли игра (используем кэш, чтобы не убить БД)
 	if !s.isPublished(batch.GameID) {
-		return nil // Молча игнорируем события от превью/черновиков
+		return nil
 	}
 
 	if len(batch.PlayerID) > 64 {
@@ -126,12 +124,12 @@ func (s *service) ProcessEvents(ctx context.Context, batch BatchIn) error {
 			continue
 		}
 		ev := collector.Event{
-			GameID:     batch.GameID,
-			SessionID:  batch.SessionID,
-			PlayerID:   batch.PlayerID,
-			Type:       e.Type,
-			Score:      e.Score,
-			DurationMs: e.DurationMs,
+			GameID:		batch.GameID,
+			SessionID:	batch.SessionID,
+			PlayerID:	batch.PlayerID,
+			Type:		e.Type,
+			Score:		e.Score,
+			DurationMs:	e.DurationMs,
 		}
 		if e.Result == "win" || e.Result == "lose" || e.Result == "quit" {
 			ev.Result = e.Result
@@ -158,7 +156,7 @@ func (s *service) isPublished(id string) bool {
 	defer cancel()
 	p, err := s.games.IsPublished(ctx, id)
 	if err != nil {
-		return e.ok // при сбое БД используем старое значение
+		return e.ok
 	}
 
 	s.pubMu.Lock()

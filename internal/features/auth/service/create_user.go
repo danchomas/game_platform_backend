@@ -38,9 +38,9 @@ func (s *service) CreateUser(ctx context.Context, name, role, managerCode string
 	token := jwt.Issue(s.jwtSecret, u.ID, u.Role, tokenTTL)
 
 	return domain.AuthResult{
-		User:      u,
-		Token:     token,
-		AccessKey: accessKey,
+		User:		u,
+		Token:		token,
+		AccessKey:	accessKey,
 	}, nil
 }
 
