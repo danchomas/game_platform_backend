@@ -2,25 +2,41 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
-	"time"
 
+	"beeline-games/internal/core/agent"
 	"beeline-games/internal/core/domain"
-	"beeline-games/internal/core/llm"
 	"beeline-games/internal/features/games/repository/postgres"
 )
 
-type LLMProvider interface {
-	Chat(ctx context.Context, msgs []llm.Msg) (string, error)
+// Agent — агентный конвейер (internal/core/agent), интерфейс нужен для тестов.
+type Agent interface {
+	Plan(ctx context.Context, in agent.PlanInput, tr *agent.Trace) (domain.GameSpec, error)
+	Build(ctx context.Context, in agent.BuildInput, stage agent.Stage, tr *agent.Trace) (agent.BuildOutput, error)
 }
 
 type InsightProvider interface {
 	GetInsightsHint(ctx context.Context) string
 }
 
+var (
+	ErrBusy     = errors.New("для этой игры уже идёт генерация или она в другом состоянии")
+	errBusySlot = errors.New("сервер занят генерациями, попробуйте через минуту")
+)
+
 type Service interface {
-	CreateAndGenerate(ctx context.Context, ownerID, prompt string) (domain.Game, string, int, error)
-	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, string, int, error)
+	// агентный конвейер
+	CreateGame(ctx context.Context, ownerID, prompt string, autoApprove bool) (domain.Game, domain.Plan, error)
+	RevisePlan(ctx context.Context, userID, gameID, feedback string) (domain.Game, domain.Plan, error)
+	ApprovePlan(ctx context.Context, userID, gameID string, spec *domain.GameSpec) (domain.Game, error)
+	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, error)
+	Subscribe(ctx context.Context, userID, gameID string) (domain.Game, <-chan domain.StatusEvent, func(), error)
+	ListGenerations(ctx context.Context, userID, gameID string) ([]domain.Generation, error)
+	Screenshot(ctx context.Context, userID, gameID string) ([]byte, error)
+	GenerationStats(ctx context.Context, role string, days int) (domain.GenerationStats, error)
+	RecoverInterrupted(ctx context.Context) error
+	Wait()
 
 	GetGame(ctx context.Context, userID, gameID string) (domain.Game, error)
 	GetMyGames(ctx context.Context, userID string, limit, offset int) ([]domain.Game, error)
@@ -39,21 +55,29 @@ type Service interface {
 }
 
 type service struct {
-	repo		postgres.Repository
-	llm		LLMProvider
-	insights	InsightProvider
-	llmTimeout	time.Duration
+	repo     postgres.Repository
+	agent    Agent
+	insights InsightProvider
 
-	genSem		chan struct{}
-	inflight	sync.Map
+	// bg — контекст приложения: фоновые сборки живут дольше HTTP-запроса
+	bg     context.Context
+	genSem chan struct{}
+	jobs   sync.WaitGroup
+	events *broker
 }
 
-func NewService(repo postgres.Repository, llmProv LLMProvider, insights InsightProvider, maxConcurrent int, llmTimeout time.Duration) Service {
+func NewService(bg context.Context, repo postgres.Repository, ag Agent, insights InsightProvider, maxConcurrent int) Service {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 4
+	}
 	return &service{
-		repo:		repo,
-		llm:		llmProv,
-		insights:	insights,
-		llmTimeout:	llmTimeout,
-		genSem:		make(chan struct{}, maxConcurrent),
+		repo:     repo,
+		agent:    ag,
+		insights: insights,
+		bg:       bg,
+		genSem:   make(chan struct{}, maxConcurrent),
+		events:   newBroker(),
 	}
 }
+
+func (s *service) Wait() { s.jobs.Wait() }
