@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"beeline-games/internal/core/agent"
+	"beeline-games/internal/core/agent/browser"
 	"beeline-games/internal/core/collector"
 	"beeline-games/internal/core/config"
 	"beeline-games/internal/core/llm"
@@ -43,7 +45,25 @@ func main() {
 	}
 	defer pool.Close()
 
-	llmClient := llm.NewClient(cfg.OpenRouterKey, cfg.OpenRouterModel, cfg.OpenRouterURL, cfg.ProxyURL, cfg.LLMTimeout+10*time.Second)
+	llmClient := llm.NewOpenRouter(cfg.OpenRouterKey, cfg.OpenRouterURL, cfg.ProxyURL, cfg.LLMTimeout+10*time.Second)
+
+	var tester agent.Tester
+	if cfg.BrowserWSURL != "" {
+		tester = browser.New(cfg.BrowserWSURL, cfg.BrowserTimeout, cfg.BrowserMaxParallel)
+	} else {
+		slog.Warn("BROWSER_WS_URL не задан: игры проверяются только статически, без запуска в браузере")
+	}
+	gameAgent := agent.New(llmClient, tester, agent.Config{
+		Models: agent.Models{
+			Planner:   cfg.PlannerModel,
+			Coder:     cfg.CoderModel,
+			Fixer:     cfg.FixerModel,
+			Fallbacks: cfg.FallbackModels,
+			MaxTokens: cfg.LLMMaxTokens,
+		},
+		MaxFixRounds: cfg.MaxFixRounds,
+		CallTimeout:  cfg.LLMTimeout,
+	})
 
 	eventCollector := collector.New(pool, 100_000)
 	colDone := make(chan struct{})
@@ -58,7 +78,10 @@ func main() {
 
 	aSvc := authSvc.NewService(aRepo, cfg.JWTSecret, cfg.ManagerCode)
 	anSvc := analyticsSvc.NewService(anRepo)
-	gSvc := gamesSvc.NewService(gRepo, llmClient, anSvc, cfg.MaxConcurrentGen, cfg.LLMTimeout)
+	gSvc := gamesSvc.NewService(ctx, gRepo, gameAgent, anSvc, cfg.MaxConcurrentGen)
+	if err := gSvc.RecoverInterrupted(ctx); err != nil {
+		slog.Error("recover interrupted generations", "err", err)
+	}
 	pSvc := playSvc.NewService(gSvc, eventCollector, cfg.PublicBaseURL)
 
 	mux := http.ServeMux{}
@@ -109,6 +132,7 @@ func main() {
 	defer cancel()
 
 	_ = srv.Shutdown(shutdownCtx)
+	gSvc.Wait()
 	<-colDone
 	slog.Info("shutdown complete")
 }

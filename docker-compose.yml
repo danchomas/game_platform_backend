@@ -28,6 +28,13 @@ services:
       - up
     restart: "no"
 
+  browser:
+    image: chromedp/headless-shell:latest
+    restart: unless-stopped
+    shm_size: 512m
+    expose:
+      - "9222"
+
   api:
     build: .
     restart: unless-stopped
@@ -36,12 +43,22 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
+      browser:
+        condition: service_started
     ports:
       - "${PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://beeline:${POSTGRES_PASSWORD:-beeline}@db:5432/beeline?sslmode=disable
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?задайте OPENROUTER_API_KEY в .env}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-4.5}
+      OPENROUTER_URL: ${OPENROUTER_URL:-}
+      LLM_PLANNER_MODEL: ${LLM_PLANNER_MODEL:-deepseek/deepseek-v4.1-flash}
+      LLM_CODER_MODEL: ${LLM_CODER_MODEL:-anthropic/claude-haiku-5.5}
+      LLM_FIXER_MODEL: ${LLM_FIXER_MODEL:-}
+      LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-deepseek/deepseek-v4-pro}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-32000}
+      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-240}
+      MAX_FIX_ROUNDS: ${MAX_FIX_ROUNDS:-2}
+      BROWSER_WS_URL: ${BROWSER_WS_URL:-ws://browser:9222}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       MANAGER_CODE: ${MANAGER_CODE:-}
