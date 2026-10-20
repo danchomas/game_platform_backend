@@ -67,12 +67,21 @@ export class PlatformApi {
       method: 'DELETE',
     });
   }
-  getAnalytics({ days, gameId = 'all', scope = 'mine' }) {
+  async getAnalytics({ days, gameId = 'all', scope = 'mine' }) {
     const path =
       gameId === 'all'
         ? `/api/analytics/overview?days=${days}&scope=${scope}`
         : `/api/analytics/games/${encodeURIComponent(gameId)}?days=${days}`;
-    return this.#httpClient.request(path);
+    const data = await this.#httpClient.request(path);
+    // Go encodes nil slices as null; views always receive collections they can render.
+    return {
+      ...data,
+      summary: data?.summary ?? {},
+      daily: data?.daily ?? [],
+      games: data?.games ?? [],
+      custom_events: data?.custom_events ?? [],
+      session_duration: data?.session_duration ?? [],
+    };
   }
   #gamePath(gameId) {
     return `/api/games/${encodeURIComponent(gameId)}`;

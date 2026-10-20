@@ -41,6 +41,39 @@ test('public and personal libraries retain distinct pagination limits', async ()
   ]);
 });
 
+test('analytics accepts Go null collections before the first game event', async () => {
+  const response = {
+    scope: 'mine',
+    days: 7,
+    summary: { sessions: 0, wins: 0 },
+    daily: [{ day: '2026-10-20', sessions: 0 }],
+    games: null,
+    custom_events: null,
+    session_duration: null,
+  };
+  const api = new PlatformApi({ request: async () => response });
+  const analytics = await api.getAnalytics({ days: 7 });
+  assert.deepEqual(analytics.games, []);
+  assert.deepEqual(analytics.custom_events, []);
+  assert.deepEqual(analytics.session_duration, []);
+  assert.deepEqual(analytics.daily, response.daily);
+  assert.deepEqual(analytics.summary, response.summary);
+  assert.equal(analytics.scope, 'mine');
+  assert.equal(response.custom_events, null);
+});
+
+test('analytics preserves nonempty server events and duration buckets', async () => {
+  const response = {
+    summary: { sessions: 1, wins: 1 },
+    daily: [{ day: '2026-10-20', sessions: 1 }],
+    games: [{ id: 'game-1', title: 'Тестовая игра', sessions: 1 }],
+    custom_events: [{ type: 'level_complete', count: 1, sessions: 1 }],
+    session_duration: [{ label: '10-30s', count: 1 }],
+  };
+  const api = new PlatformApi({ request: async () => response });
+  assert.deepEqual(await api.getAnalytics({ days: 7, gameId: 'game-1' }), response);
+});
+
 test('gallery composes search and status filters without mutating source data', () => {
   const games = structuredClone(DEMO_GAMES);
   const order = games.map((game) => game.id);
