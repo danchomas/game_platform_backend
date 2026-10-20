@@ -3,165 +3,160 @@ package llm
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
-type Msg struct {
-	Role	string	`json:"role"`
-	Content	string	`json:"content"`
+const defaultOpenRouterURL = "https://openrouter.ai/api/v1/chat/completions"
+
+// OpenRouter — OpenAI-совместимый chat/completions. Подходит и для любого
+// другого OpenAI-совместимого шлюза: достаточно сменить endpoint и ключ.
+type OpenRouter struct {
+	key, url string
+	http     *http.Client
+	retries  int
 }
 
-type Client struct {
-	Key, Model, URL	string
-	HTTP		*http.Client
-}
-
-func NewClient(key, model, endpoint, proxyStr string, timeout time.Duration) *Client {
-	client := &http.Client{Timeout: timeout}
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
+func NewOpenRouter(key, endpoint, proxyStr string, timeout time.Duration) *OpenRouter {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if proxyStr != "" {
 		if pURL, err := url.Parse(proxyStr); err == nil {
 			transport.Proxy = http.ProxyURL(pURL)
 		}
 	}
-	client.Transport = transport
-
-	return &Client{Key: key, Model: model, URL: endpoint, HTTP: client}
+	if endpoint == "" {
+		endpoint = defaultOpenRouterURL
+	}
+	return &OpenRouter{
+		key:     key,
+		url:     endpoint,
+		http:    &http.Client{Timeout: timeout, Transport: transport},
+		retries: 2,
+	}
 }
 
-var ErrNoKey = errors.New("OPENROUTER_API_KEY не задан")
+type orRequest struct {
+	Model       string         `json:"model"`
+	Models      []string       `json:"models,omitempty"`
+	Messages    []Msg          `json:"messages"`
+	MaxTokens   int            `json:"max_tokens,omitempty"`
+	Temperature float64        `json:"temperature"`
+	Usage       map[string]any `json:"usage"`
+}
 
-func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
-	if c.Key == "" {
-		return "", ErrNoKey
-	}
-	body, _ := json.Marshal(map[string]any{
-		"model":	c.Model,
-		"messages":	msgs,
-		"max_tokens":	8000,
-		"temperature":	0.7,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/beeline-hackathon/vibe-games")
-	req.Header.Set("X-Title", "Beeline Vibe Games")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+type orResponse struct {
+	Model   string `json:"model"`
+	Choices []struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int     `json:"prompt_tokens"`
+		CompletionTokens int     `json:"completion_tokens"`
+		Cost             float64 `json:"cost"`
+	} `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+		Code    any    `json:"code"`
+	} `json:"error"`
+}
 
-	resp, err := c.HTTP.Do(req)
+func (c *OpenRouter) Complete(ctx context.Context, req Request) (Response, error) {
+	if c.key == "" {
+		return Response{}, ErrNoKey
+	}
+	body := orRequest{
+		Model:       req.Model,
+		Messages:    req.Messages,
+		MaxTokens:   req.MaxTokens,
+		Temperature: req.Temperature,
+		Usage:       map[string]any{"include": true},
+	}
+	if len(req.Fallbacks) > 0 {
+		body.Models = append([]string{req.Model}, req.Fallbacks...)
+	}
+	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return Response{}, err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= c.retries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return Response{}, ctx.Err()
+			case <-time.After(time.Duration(attempt*2) * time.Second):
+			}
+		}
+		resp, err := c.do(ctx, raw)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		var he *HTTPError
+		if !errors.As(err, &he) || !he.Retryable() {
+			return Response{}, err
+		}
+	}
+	return Response{}, lastErr
+}
+
+func (c *OpenRouter) do(ctx context.Context, body []byte) (Response, error) {
+	start := time.Now()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
+	if err != nil {
+		return Response{}, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.key)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/beeline-hackathon/vibe-games")
+	httpReq.Header.Set("X-Title", "Beeline Vibe Games")
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return Response{}, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return "", err
+		return Response{}, err
 	}
-	var out struct {
-		Choices	[]struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		}	`json:"choices"`
-		Error	*struct {
-			Message string `json:"message"`
-		}	`json:"error"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("openrouter: HTTP %d, не JSON: %.200s", resp.StatusCode, raw)
+
+	var out orResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return Response{}, &HTTPError{Status: resp.StatusCode, Msg: fmt.Sprintf("не JSON: %.200s", data)}
 	}
 	if out.Error != nil {
-		return "", fmt.Errorf("openrouter: %s", out.Error.Message)
+		status := resp.StatusCode
+		if status < 300 {
+			status = http.StatusBadGateway
+		}
+		return Response{}, &HTTPError{Status: status, Msg: out.Error.Message}
 	}
 	if resp.StatusCode >= 300 || len(out.Choices) == 0 {
-		return "", fmt.Errorf("openrouter: HTTP %d, пустой ответ", resp.StatusCode)
+		return Response{}, &HTTPError{Status: resp.StatusCode, Msg: "пустой ответ"}
 	}
-	return out.Choices[0].Message.Content, nil
-}
 
-type Result struct {
-	Reply, HTML, Title, Genre, Audience string
-}
-
-func between(s, open, close string) (string, bool) {
-	i := strings.Index(s, open)
-	if i < 0 {
-		return "", false
+	r := Response{
+		Text:         out.Choices[0].Message.Content,
+		Model:        out.Model,
+		FinishReason: out.Choices[0].FinishReason,
+		Latency:      time.Since(start),
 	}
-	i += len(open)
-	j := strings.LastIndex(s, close)
-	if j < i {
-
-		return strings.TrimSpace(s[i:]), false
-	}
-	return strings.TrimSpace(s[i:j]), true
-}
-
-func stripFence(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if nl := strings.Index(s, "\n"); nl >= 0 {
-			s = s[nl+1:]
+	if out.Usage != nil {
+		r.Usage = Usage{
+			PromptTokens:     out.Usage.PromptTokens,
+			CompletionTokens: out.Usage.CompletionTokens,
+			CostUSD:          out.Usage.Cost,
 		}
-		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
-	}
-	return strings.TrimSpace(s)
-}
-
-var ErrBadFormat = errors.New("модель вернула ответ не в ожидаемом формате")
-
-func Parse(raw string) (Result, error) {
-	var r Result
-	if v, ok := between(raw, "<reply>", "</reply>"); ok {
-		r.Reply = v
-	}
-	if v, ok := between(raw, "<meta>", "</meta>"); ok {
-		var m struct{ Title, Genre, Audience string }
-		if json.Unmarshal([]byte(stripFence(v)), &m) == nil {
-			r.Title, r.Genre, r.Audience = clip(m.Title, 80), clip(m.Genre, 40), clip(m.Audience, 60)
-		}
-	}
-	game, closed := between(raw, "<game>", "</game>")
-	if game == "" {
-
-		if i := strings.Index(raw, "```html"); i >= 0 {
-			game = stripFence(raw[i:])
-			closed = true
-		} else if i := strings.Index(strings.ToLower(raw), "<!doctype html"); i >= 0 {
-			game, closed = raw[i:], true
-		}
-	}
-	game = stripFence(game)
-	low := strings.ToLower(game)
-	if len(game) < 200 || !strings.Contains(low, "<html") || !closed || !strings.Contains(low, "</html>") {
-		return r, ErrBadFormat
-	}
-	r.HTML = game
-	if r.Reply == "" {
-		r.Reply = "Готово! Игра обновлена."
 	}
 	return r, nil
-}
-
-func clip(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > n {
-		return string(r[:n])
-	}
-	return s
 }
