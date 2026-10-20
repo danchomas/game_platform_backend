@@ -15,6 +15,7 @@ import (
 	coreErrs "beeline-games/internal/core/errors"
 )
 
+//go:embed sdk.js
 var sdkJS string
 
 var headRe = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
