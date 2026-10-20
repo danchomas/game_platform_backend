@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Game struct {
 	ID		string		`json:"id"`
@@ -14,6 +17,9 @@ type Game struct {
 	Version		int		`json:"version"`
 	Published	bool		`json:"published"`
 	Plays		int64		`json:"plays"`
+	Status		string		`json:"status"`
+	StatusDetail	string		`json:"status_detail,omitempty"`
+	Spec		json.RawMessage	`json:"spec,omitempty"`
 	CreatedAt	time.Time	`json:"created_at"`
 	UpdatedAt	time.Time	`json:"updated_at"`
 }
@@ -35,6 +41,7 @@ type VersionInfo struct {
 type VersionInput struct {
 	GameID		string
 	UserText	string
+	Instruction	string
 	Reply		string
 	HTML		string
 	Title		string
