@@ -1,0 +1,240 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #f6f4e9;
+  color: #2b3326;
+  font-family: Arial, Helvetica, sans-serif;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+}
+#app {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background-image:
+    linear-gradient(#52614008 1px, transparent 1px),
+    linear-gradient(90deg, #52614008 1px, transparent 1px),
+    radial-gradient(circle closest-side at center, #f3df6e59 90%, transparent 91%);
+  background-size:
+    34px 34px,
+    34px 34px,
+    100% 100%;
+}
+.cover {
+  position: relative;
+  text-align: center;
+  z-index: 1;
+  width: 100%;
+  padding: 20px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin: 6px 0 18px;
+}
+.cover h1 {
+  font-size: clamp(32px, 5.4vw, 57px);
+  font-weight: 500;
+  line-height: 1.06;
+  letter-spacing: -2px;
+  margin: 10px 0 12px;
+}
+.sub {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #7e826d;
+  margin: 0 0 18px;
+}
+.go {
+  border-radius: 30px;
+  background: #2d372b;
+  color: #fff;
+  padding: 15px 28px;
+  font-size: 13px;
+  display: inline-flex;
+  gap: 25px;
+  align-items: center;
+}
+.go:hover {
+  background: #45523a;
+}
+.snake-art {
+  width: 180px;
+  height: 108px;
+  margin: 0 auto;
+  display: block;
+}
+.stamp {
+  position: absolute;
+  right: 22px;
+  top: 22px;
+  border: 1px solid #8d927b44;
+  border-radius: 100%;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  transform: rotate(12deg);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-align: center;
+  line-height: 1.6;
+}
+.corner {
+  position: absolute;
+  bottom: 18px;
+  left: 22px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #959781;
+}
+.corner.right {
+  left: auto;
+  right: 22px;
+}
+.game {
+  position: relative;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 15px;
+  z-index: 2;
+}
+.hud {
+  flex-shrink: 0;
+  width: min(100%, 460px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  min-height: 30px;
+}
+.hud button {
+  background: transparent;
+  font-size: 12px;
+  color: #5e6556;
+}
+.board {
+  position: relative;
+  margin: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-width: 100%;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+}
+canvas {
+  touch-action: none;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 16px;
+  background: #e9ecdd;
+}
+.controls {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+.controls button {
+  width: 48px;
+  height: 38px;
+  background: #fff;
+  border-radius: 10px;
+  color: #323b2c;
+  box-shadow: 0 2px 0 #daddd0;
+  font-size: 20px;
+  touch-action: none;
+}
+.controls.large button {
+  width: 58px;
+  height: 45px;
+}
+.hint {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #969b89;
+  margin: 8px 0 0;
+}
+.end {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: #f6f4e9ed;
+  z-index: 5;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 20px;
+}
+.end h2 {
+  font-size: 35px;
+  letter-spacing: -1px;
+  font-weight: 500;
+  margin: 10px;
+}
+.end p {
+  font-size: 13px;
+  color: #838773;
+}
+.result-icon {
+  font-size: 55px;
+  margin-bottom: 12px;
+}
+@media (max-width: 420px) {
+  .stamp,
+  .corner {
+    display: none;
+  }
+  .cover h1 {
+    font-size: clamp(26px, 8vw, 36px);
+    letter-spacing: -1px;
+    overflow-wrap: anywhere;
+  }
+  .eyebrow {
+    letter-spacing: 1.5px;
+    font-size: 9px;
+  }
+}
+@media (max-height: 420px) {
+  .snake-art {
+    height: 60px;
+  }
+  .cover h1 {
+    font-size: 32px;
+  }
+  .eyebrow {
+    margin-bottom: 8px;
+  }
+  .cover {
+    padding: 8px;
+  }
+  .controls button {
+    height: 32px !important;
+  }
+  .hint {
+    display: none;
+  }
+}

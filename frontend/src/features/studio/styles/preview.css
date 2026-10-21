@@ -1,0 +1,498 @@
+.version-badge {
+  font-size: 9px;
+  padding: 3px 6px;
+  color: #8b957c;
+  border-radius: 4px;
+  border: 1px solid #e4e8da;
+  background: #fff;
+  white-space: nowrap;
+}
+.preview-panel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.preview-toolbar {
+  height: 49px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 15px;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.preview-tabs {
+  display: flex;
+  height: 100%;
+  gap: 17px;
+  align-items: stretch;
+}
+.preview-tabs > button {
+  padding: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: #8c9c7b;
+  font-size: 10px;
+  margin-bottom: -1px;
+}
+.preview-tabs > button.active {
+  color: #5d7546;
+  border-bottom-color: #d1b94c;
+}
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.preview-stage {
+  background: #fafbf7;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  position: relative;
+}
+.iframe-shell {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e6e8da;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #f5f4e9;
+  box-shadow: 0 2px 7px #2c331106;
+}
+.iframe-shell iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.preview-infobar {
+  height: 31px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  font-size: 9px;
+  color: #97a781;
+  flex-shrink: 0;
+}
+.preview-infobar > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.preview-infobar > span:first-child > i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #a4b489;
+}
+.info-divider {
+  display: inline-block;
+  width: 1px;
+  height: 8px;
+  background: #e3e9d8;
+  margin: 0 4px;
+}
+.preview-bottom {
+  padding: 17px 19px 16px;
+  flex-shrink: 0;
+}
+.preview-bottom-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 17px;
+}
+.preview-bottom h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: #4b6139;
+}
+.preview-bottom p {
+  font-size: 10px;
+  color: #94a57e;
+  margin-top: 6px;
+}
+.game-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.code-stage {
+  display: block;
+  overflow: auto;
+  padding: 0;
+  background: #252c23;
+}
+.code-view {
+  margin: 0;
+  color: #becba4;
+  padding: 21px;
+  font:
+    10px/1.7 'SFMono-Regular',
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.expanded {
+  position: fixed;
+  inset: 18px;
+  width: auto;
+  height: auto;
+  z-index: 60;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 80px #26300ddb,
+    0 20px 80px #0004;
+}
+.expanded .preview-stage {
+  padding: 20px;
+}
+.expanded .preview-bottom {
+  display: none;
+}
+.expanded .preview-infobar {
+  border-bottom: 0;
+}
+.settings-drawer {
+  position: absolute;
+  bottom: 123px;
+  left: 0;
+  right: 0;
+  max-height: 330px;
+  overflow: auto;
+  border-top: 1px solid #e0e7d3;
+  background: #fffffff5;
+  backdrop-filter: blur(14px);
+  padding: 14px 20px 18px;
+  box-shadow: 0 -10px 35px #3e551115;
+  z-index: 3;
+}
+.drawer-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.drawer-title h3 {
+  font-size: 11px;
+  font-weight: 500;
+  color: #788c61;
+}
+.range-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #8c9c7a;
+  margin: 10px 0 17px;
+  gap: 12px;
+}
+.range-label strong {
+  font-weight: 400;
+  color: #7f8e6b;
+  font-size: 9px;
+}
+.range-label input {
+  width: 100%;
+  accent-color: #c7b54c;
+  height: 3px;
+  cursor: pointer;
+}
+.toggle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #879a72;
+  margin-bottom: 13px;
+}
+.toggle {
+  width: 30px;
+  height: 18px;
+  border-radius: 20px;
+  background: #e1e6d7;
+  position: relative;
+  padding: 0;
+}
+.toggle i {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  transition: left 0.2s;
+}
+.toggle.on {
+  background: #c7ba67;
+}
+.toggle.on i {
+  left: 15px;
+}
+.drawer-note {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #92a67a;
+  margin: 8px 0;
+}
+.parameter-prompt {
+  font-size: 10px;
+  color: #83996b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px;
+  border: 1px solid #e4ecd8;
+  border-radius: 5px;
+  margin-top: 8px;
+  width: 100%;
+  text-align: left;
+}
+.parameter-prompt:hover {
+  background: #f8faef;
+}
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 7px 0;
+  border-bottom: 1px solid #edf1e5;
+  font-size: 10px;
+  color: #82946e;
+}
+.version-row > div {
+  flex: 1;
+}
+.version-row small {
+  display: block;
+  font-size: 8px;
+  color: #a5b295;
+  margin-top: 5px;
+}
+.preview-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  background: #fafcf0ef;
+  backdrop-filter: blur(6px);
+  color: #96a77e;
+  font-size: 12px;
+  z-index: 4;
+}
+.preview-busy small {
+  font-size: 9px;
+  color: #adb89b;
+}
+.range-label,
+.toggle-label {
+  font-size: 11px;
+  color: #829b66;
+}
+.preview-bottom-title .status {
+  background: #f5f6ef;
+}
+@media (max-width: 1190px) {
+  .game-actions {
+    gap: 5px;
+  }
+  .game-actions .button {
+    font-size: 8px;
+    padding: 8px;
+  }
+  .preview-bottom {
+    padding: 16px 13px;
+  }
+  .preview-toolbar {
+    padding: 0 11px;
+  }
+  .preview-tabs {
+    gap: 12px;
+  }
+  .preview-tabs > button {
+    font-size: 8px;
+  }
+  .preview-actions {
+    gap: 1px;
+  }
+  .preview-stage {
+    padding: 11px;
+  }
+}
+@media (max-width: 1000px) {
+  .preview-tabs {
+    gap: 8px;
+  }
+  .preview-tabs > button {
+    font-size: 8px;
+    gap: 4px;
+  }
+  .preview-toolbar {
+    padding: 0 8px;
+  }
+  .preview-tabs > button > svg {
+    width: 12px;
+  }
+  .preview-actions .icon-btn {
+    width: 23px;
+  }
+  .game-actions > .button:first-child {
+    font-size: 0;
+    gap: 0;
+  }
+  .game-actions > .button:first-child svg {
+    width: 14px;
+  }
+  .preview-infobar {
+    padding: 0 12px;
+    font-size: 8px;
+  }
+  .preview-infobar > span:last-child {
+    gap: 2px;
+  }
+  .preview-bottom h3 {
+    font-size: 12px;
+  }
+  .preview-bottom p {
+    font-size: 8px;
+  }
+  .preview-bottom-title .status {
+    font-size: 7px;
+    padding: 4px;
+  }
+}
+@media (max-width: 800px) {
+  .preview-tabs > button {
+    font-size: 10px;
+  }
+  .preview-tabs {
+    gap: 18px;
+  }
+  .preview-toolbar {
+    padding: 0 14px;
+  }
+  .preview-actions {
+    gap: 4px;
+  }
+  .preview-actions .icon-btn {
+    width: 28px;
+  }
+  .preview-infobar {
+    font-size: 8px;
+    padding: 0 16px;
+  }
+  .preview-bottom {
+    padding: 15px 18px;
+  }
+  .preview-bottom h3 {
+    font-size: 14px;
+  }
+  .preview-bottom p {
+    font-size: 9px;
+  }
+  .preview-bottom-title .status {
+    font-size: 8px;
+  }
+  .game-actions > .button:first-child {
+    font-size: 9px;
+    gap: 6px;
+  }
+  .game-actions > .button {
+    font-size: 9px;
+  }
+  .game-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .game-actions > .toolbar-spacer {
+    display: none;
+  }
+  .settings-drawer {
+    bottom: 160px;
+  }
+}
+@media (max-width: 620px) {
+  .preview-stage {
+    padding: 10px;
+  }
+  .preview-tabs > button {
+    font-size: 9px;
+  }
+  .preview-tabs {
+    gap: 13px;
+  }
+  .preview-toolbar {
+    padding: 0 11px;
+  }
+  .preview-actions {
+    gap: 0;
+  }
+  .game-actions {
+    gap: 7px;
+  }
+  .game-actions > .button {
+    font-size: 8px;
+  }
+  .game-actions > .button:first-child {
+    font-size: 8px;
+  }
+  .game-actions .button.small {
+    padding: 8px;
+  }
+  .preview-bottom h3 {
+    font-size: 12px;
+  }
+  .preview-bottom p {
+    font-size: 9px;
+  }
+  .preview-infobar {
+    font-size: 7px;
+    padding: 0 12px;
+  }
+  .preview-bottom {
+    padding: 16px 13px;
+  }
+  .expanded {
+    inset: 8px;
+    height: auto;
+  }
+  .expanded .preview-toolbar {
+    height: 47px;
+  }
+  .expanded .preview-infobar {
+    font-size: 6px;
+  }
+  .expanded .preview-stage {
+    padding: 9px;
+  }
+  .settings-drawer {
+    bottom: 160px;
+  }
+  .game-actions > .button:first-child {
+    font-size: 9px;
+  }
+  .preview-bottom-title .status {
+    font-size: 8px;
+  }
+}
