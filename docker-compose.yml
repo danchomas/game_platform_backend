@@ -68,5 +68,14 @@ services:
     volumes:
       - ./web:/app/web:ro
 
+  # студия (React): nginx раздаёт сборку и проксирует /api, /g, /healthz в api
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:80"
+
 volumes:
   pgdata:
