@@ -13,7 +13,8 @@ import (
 	"beeline-games/internal/core/transport/http/response"
 )
 
-// Status — для опроса без SSE.
+// Status — для опроса без SSE. Вместе со статусом отдаёт карточку игры (без HTML):
+// после фоновой сборки клиенту нужны новые название, версия и план.
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	userID, _ := request.UserID(r)
 	g, err := h.svc.GetGame(r.Context(), userID, r.PathValue("id"))
@@ -21,7 +22,11 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusNotFound, "игра не найдена")
 		return
 	}
-	response.JSON(w, http.StatusOK, statusOf(g))
+	g.HTML = ""
+	response.JSON(w, http.StatusOK, struct {
+		domain.StatusEvent
+		Game gameDTO `json:"game"`
+	}{statusOf(g), toDTO(g, h.publicBaseURL)})
 }
 
 func statusOf(g domain.Game) domain.StatusEvent {
