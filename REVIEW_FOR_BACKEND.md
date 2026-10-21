@@ -24,6 +24,10 @@
 - `main.go` — wiring агента и тестера.
 - `go.mod` — `chromedp v0.14.2` (v0.21 поменял API на generic — не обновлять вслепую).
 
+## Фронтенд (ветка `feature/frontend`)
+- Студия перенесена в `frontend/` через `git subtree` (история сохранена). В compose — сервис `web` (nginx, порт `WEB_PORT`, по умолчанию 3000), проксирует `/api`, `/g`, `/healthz` в `api`; `frontend/` исключён из контекста сборки Go-образа.
+- `GET /api/games/{id}/status` теперь отдаёт ещё и `game` (без html) — фронту нужна карточка игры после фоновой сборки, а `GET /api/games/{id}` черновики владельцу не отдаёт (см. п. 2 ниже).
+
 ## Нашёл, но не трогал
 1. `internal/core/transport/http/server/server.go` — остаток монолита, импортирует несуществующие пакеты → `go build ./...` / `go vet ./...` падают. Никем не импортируется — **удалить**.
 2. `GET /api/games/{id}`, `GET /g/{id}`, `preview.jpg` без auth-middleware → `userID` всегда пустой, владелец **не видит свои черновики**, хотя README обещает `?token=`. Нужен optional-auth middleware.
