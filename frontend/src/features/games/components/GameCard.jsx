@@ -76,7 +76,7 @@ export function GameCard({ game, index, demo, isOwner, onOpen, onRename, onDelet
         )}
       </div>
       <div className="game-card-footer">
-        <GameStatus published={game.published} />
+        <GameStatus published={game.published} status={game.status} />
         <span>
           <Eye size={13} />
           {formatNumber(game.plays)}

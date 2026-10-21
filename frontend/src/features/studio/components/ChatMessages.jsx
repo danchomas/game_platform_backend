@@ -1,15 +1,39 @@
 import { useEffect, useRef } from 'react';
 import { ArrowUpRight, Sparkles, Check } from 'lucide-react';
 import { GenerationSteps as Steps } from '../../../shared/ui/GenerationSteps';
+import { STATUS, getBuildSteps } from '../../games/pipelineStatus';
+import { PlanCard } from './PlanCard';
 
-export function ChatMessages({ messages, demo, busy, generating }) {
+function ProgressNote({ stage }) {
+  if (stage === STATUS.planning) {
+    return (
+      <p>
+        Продумываю игру: механику, управление и оформление.
+        <br />
+        Обычно это 10–30 секунд.
+      </p>
+    );
+  }
+  return (
+    <>
+      <p>
+        Собираю игру и проверяю её в мобильном браузере.
+        <br />
+        Обычно это 1–3 минуты.
+      </p>
+      <Steps steps={getBuildSteps(stage)} />
+    </>
+  );
+}
+
+export function ChatMessages({ messages, demo, busy, generating, stage, plan, onApprove }) {
   const end = useRef(null);
   useEffect(() => {
     end.current?.scrollIntoView({
       behavior: 'smooth',
       block: 'nearest',
     });
-  }, [messages, busy]);
+  }, [messages, busy, stage, plan]);
   return (
     <div className="chat-messages" aria-live="polite">
       {!messages.length ? (
@@ -19,7 +43,8 @@ export function ChatMessages({ messages, demo, busy, generating }) {
           </span>
           <h3>С чего начнём?</h3>
           <p>
-            Расскажите, какая игра вам нужна и кто будет в неё играть. Остальное возьму на себя.
+            Расскажите, какая игра вам нужна и кто будет в неё играть. Сначала я предложу план, а
+            после вашего подтверждения соберу и проверю игру.
           </p>
           <div className="welcome-example">
             Например: «Змейка для бабушки — крупные кнопки, спокойный темп, тёплые цвета».
@@ -54,6 +79,7 @@ export function ChatMessages({ messages, demo, busy, generating }) {
           </div>
         ))
       )}
+      {plan && !generating && <PlanCard plan={plan} busy={busy} onApprove={onApprove} />}
       {generating && (
         <div className="message assistant generating">
           <span className="message-avatar">
@@ -66,12 +92,7 @@ export function ChatMessages({ messages, demo, busy, generating }) {
               <i />
               <i />
             </div>
-            <p>
-              Создаю игру по вашему запросу.
-              <br />
-              Обычно это занимает 20–90 секунд.
-            </p>
-            <Steps busy />
+            <ProgressNote stage={stage} />
           </div>
         </div>
       )}

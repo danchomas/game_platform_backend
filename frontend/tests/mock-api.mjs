@@ -6,6 +6,30 @@ const user = { id: 'qa-manager', name: 'Тестовый менеджер', role
 let game = null,
   messages = [],
   versions = [];
+const plan = {
+  title: 'Тестовая змейка',
+  genre: 'snake',
+  controls: { scheme: 'swipe' },
+  ui: { scale: 'xlarge' },
+  round_seconds: 180,
+  summary: '• Тестовый план API: змейка\n• Управление свайпами',
+};
+
+// Walks the fixture game through the server pipeline stages, as the real background build does.
+function startBuild(reply) {
+  const stages = ['generating', 'validating', 'testing', 'ready'];
+  stages.forEach((status, index) =>
+    setTimeout(() => {
+      game.status = status;
+      if (status === 'ready') {
+        game.version++;
+        game.html = demoHTML({ ...DEMO_GAMES[0], title: game.title });
+        messages.push({ role: 'assistant', content: reply, version: game.version });
+        versions.unshift({ version: game.version, instruction: messages.at(-2)?.content || '' });
+      }
+    }, 700 * index),
+  );
+}
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
@@ -42,16 +66,41 @@ const server = http.createServer(async (req, res) => {
       title: 'Тестовая змейка',
       prompt: input.prompt,
       published: false,
-      html: demoHTML({ ...DEMO_GAMES[0], title: 'Тестовая змейка' }),
+      version: 0,
+      status: 'awaiting_approval',
+      spec: plan,
+      html: '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     messages = [
       { role: 'user', content: input.prompt },
-      { role: 'assistant', content: 'Тестовый ответ API: игра готова.', version: 1 },
+      { role: 'assistant', content: plan.summary },
     ];
-    versions = [{ version: 1, instruction: input.prompt }];
-    json({ game, reply: messages[1].content, version: 1 }, 201);
+    versions = [];
+    json({ game, plan, reply: plan.summary }, 201);
+    return;
+  }
+  if (url.pathname.endsWith('/plan') && req.method === 'POST') {
+    messages.push(
+      { role: 'user', content: input.content },
+      { role: 'assistant', content: plan.summary },
+    );
+    json({ game, plan, reply: plan.summary });
+    return;
+  }
+  if (url.pathname.endsWith('/approve') && req.method === 'POST') {
+    startBuild('Тестовый ответ API: игра собрана и проверена.');
+    json({ game }, 202);
+    return;
+  }
+  if (url.pathname.endsWith('/status')) {
+    json({
+      game_id: game.id,
+      status: game.status,
+      version: game.version,
+      game: { ...game, html: undefined },
+    });
     return;
   }
   if (url.pathname.endsWith('/messages')) {
@@ -59,17 +108,9 @@ const server = http.createServer(async (req, res) => {
       json(messages);
       return;
     }
-    game.version++;
-    messages.push(
-      { role: 'user', content: input.content },
-      {
-        role: 'assistant',
-        content: 'Тестовый ответ API: правки применены.',
-        version: game.version,
-      },
-    );
-    versions.unshift({ version: game.version, instruction: input.content });
-    json({ game, reply: 'Тестовый ответ API: правки применены.', version: game.version });
+    messages.push({ role: 'user', content: input.content });
+    startBuild('Тестовый ответ API: правки применены.');
+    json({ game }, 202);
     return;
   }
   if (url.pathname.endsWith('/versions')) {

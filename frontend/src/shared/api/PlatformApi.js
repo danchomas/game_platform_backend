@@ -38,11 +38,27 @@ export class PlatformApi {
   getVersions(gameId) {
     return this.#httpClient.request(`${this.#gamePath(gameId)}/versions`);
   }
+  // Returns { game, plan, reply }: the server drafts a plan that must be approved before the build.
   createGame(prompt) {
     return this.#post('/api/games', {
       prompt,
     });
   }
+  revisePlan(gameId, content) {
+    return this.#post(`${this.#gamePath(gameId)}/plan`, {
+      content,
+    });
+  }
+  // Starts the background build; an edited plan replaces the stored one.
+  approvePlan(gameId, spec) {
+    return this.#post(`${this.#gamePath(gameId)}/approve`, spec ? { spec } : undefined);
+  }
+  getStatus(gameId) {
+    return this.#httpClient.request(`${this.#gamePath(gameId)}/status`, {
+      timeout: 15_000,
+    });
+  }
+  // Starts a background edit; progress is read through getStatus.
   iterateGame(gameId, content) {
     return this.#post(`${this.#gamePath(gameId)}/messages`, {
       content,

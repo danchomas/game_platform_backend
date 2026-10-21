@@ -4,6 +4,15 @@ import { renderDemoGame } from '../../../demo/renderDemoGame.js';
 import { download } from '../../../shared/lib/download.js';
 import { useDemoEvents } from './useDemoEvents.js';
 import { buildGenerationPrompt, getVisibleMessage } from '../generationPrompt.js';
+import { STATUS, isBusyStatus, isPlanStage, parseSpec } from '../../games/pipelineStatus.js';
+
+const POLL_INTERVAL_MS = 1500;
+const BUILD_TIMEOUT_MS = 10 * 60_000;
+
+// Thrown when the editor switched to another game while a build was being awaited.
+const SUPERSEDED = Symbol('superseded');
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function useGameEditor({
   api,
@@ -19,12 +28,15 @@ export function useGameEditor({
   const [sourceHTML, setSourceHTML] = useState('');
   const [messages, setMessages] = useState(() => (isDemo ? getDemoMessages(initialGame) : []));
   const [versions, setVersions] = useState([]);
+  const [plan, setPlan] = useState(null);
+  const [stage, setStage] = useState(null);
   const [options, setOptions] = useState({
     speed: 5,
     large: true,
   });
   const [operation, setOperation] = useState(null);
   const operationLock = useRef(false);
+  const editorSession = useRef(0);
   const html = useMemo(
     () => (isDemo ? (game ? renderDemoGame(game, options) : '') : sourceHTML),
     [isDemo, game, options, sourceHTML],
@@ -35,10 +47,13 @@ export function useGameEditor({
     gameId: game?.id,
   });
   function reset(nextGame = null, demo = isDemo) {
+    editorSession.current++;
     setGame(nextGame);
     setSourceHTML('');
     setMessages(demo ? getDemoMessages(nextGame) : []);
     setVersions([]);
+    setPlan(null);
+    setStage(null);
   }
 
   // The ref locks synchronously, including two clicks before React has rendered the busy state.
@@ -54,21 +69,82 @@ export function useGameEditor({
       await action();
       return true;
     } catch (error) {
-      onError(error.message);
+      if (error !== SUPERSEDED) {
+        onError(error.message);
+      }
       return false;
     } finally {
       operationLock.current = false;
       setOperation(null);
+      setStage(null);
     }
   }
+
+  // Builds run in the background on the server; the editor follows them through the status endpoint.
+  async function waitForBuild(gameId) {
+    const session = editorSession.current;
+    const deadline = Date.now() + BUILD_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await delay(POLL_INTERVAL_MS);
+      if (session !== editorSession.current) {
+        throw SUPERSEDED;
+      }
+      const status = await api.getStatus(gameId);
+      if (session !== editorSession.current) {
+        throw SUPERSEDED;
+      }
+      setStage(status.status);
+      if (status.game && isBusyStatus(status.status)) {
+        setGame(status.game);
+      }
+      if (!isBusyStatus(status.status)) {
+        return status;
+      }
+    }
+    throw new Error('Сборка идёт дольше обычного. Откройте игру позже из коллекции.');
+  }
+
+  async function applyBuild(status, previousVersion) {
+    const nextGame = status.game;
+    setGame(nextGame);
+    onChanged();
+    if (status.status === STATUS.failed) {
+      setPlan(parseSpec(nextGame.spec));
+      throw new Error(
+        status.detail || 'Не удалось собрать игру. Поправьте план или попробуйте ещё раз.',
+      );
+    }
+    const [source, history] = await Promise.all([
+      api.getGameHTML(nextGame.id),
+      api.getMessages(nextGame.id),
+    ]);
+    setSourceHTML(source);
+    setMessages((history || []).map(getVisibleMessage));
+    await reloadVersions(nextGame.id);
+    if (nextGame.version === previousVersion) {
+      throw new Error(status.detail || 'Изменения не применены. Попробуйте сформулировать иначе.');
+    }
+    if (status.detail) {
+      notify(status.detail);
+    }
+  }
+
+  async function followBuild(gameToFollow) {
+    return run('generate', async () => {
+      setStage(gameToFollow.status);
+      await applyBuild(await waitForBuild(gameToFollow.id), gameToFollow.version);
+    });
+  }
+
   async function open(nextGame) {
-    return run('open', async () => {
+    const opened = await run('open', async () => {
       reset(nextGame);
       if (isDemo) {
         return;
       }
-      setSourceHTML(await api.getGameHTML(nextGame.id));
+      const hasCode = nextGame.version > 0;
       if (nextGame.owner_id !== userId) {
+        setSourceHTML(await api.getGameHTML(nextGame.id));
         setMessages([
           {
             role: 'assistant',
@@ -81,6 +157,7 @@ export function useGameEditor({
       const results = await Promise.allSettled([
         api.getMessages(nextGame.id),
         api.getVersions(nextGame.id),
+        hasCode ? api.getGameHTML(nextGame.id) : Promise.resolve(''),
       ]);
       if (results[0].status === 'fulfilled') {
         setMessages((results[0].value || []).map(getVisibleMessage));
@@ -88,12 +165,25 @@ export function useGameEditor({
       if (results[1].status === 'fulfilled') {
         setVersions(results[1].value || []);
       }
-      const failed = results.find((result) => result.status === 'rejected');
+      if (results[2].status === 'rejected') {
+        throw results[2].reason;
+      }
+      setSourceHTML(results[2].value);
+      if (isPlanStage(nextGame)) {
+        setPlan(parseSpec(nextGame.spec));
+      }
+      const failed = results.slice(0, 2).find((result) => result.status === 'rejected');
       if (failed) {
         notify(`Игра загружена, но история недоступна: ${failed.reason.message}`);
       }
     });
+    // A build started earlier (or in another tab) is still running: keep following it.
+    if (opened && !isDemo && nextGame.owner_id === userId && isBusyStatus(nextGame.status)) {
+      void followBuild(nextGame);
+    }
+    return opened;
   }
+
   async function generate(prompt, audience) {
     if (isDemo) {
       onRequireConnection();
@@ -104,36 +194,59 @@ export function useGameEditor({
       notify('Эту игру может редактировать только автор. Создайте новый проект.');
       return false;
     }
+    if (game && isBusyStatus(game.status)) {
+      notify('Игра ещё собирается. Дождитесь окончания сборки.');
+      return false;
+    }
     const previous = messages;
+    const userMessage = {
+      role: 'user',
+      content: prompt,
+    };
     return run('generate', async () => {
-      const userMessage = {
-        role: 'user',
-        content: prompt,
-      };
-      const instruction = buildGenerationPrompt(prompt, audience);
       setMessages([...previous, userMessage]);
-      let result;
+      if (!game || isPlanStage(game)) {
+        setStage(STATUS.planning);
+        let result;
+        try {
+          result = game
+            ? await api.revisePlan(game.id, prompt)
+            : await api.createGame(buildGenerationPrompt(prompt, audience));
+        } catch (error) {
+          setMessages(previous);
+          onChanged();
+          throw error;
+        }
+        setGame(result.game);
+        setPlan(result.plan);
+        setMessages([...previous, userMessage, { role: 'assistant', content: result.reply }]);
+        onChanged();
+        return;
+      }
       try {
-        result = await (game ? api.iterateGame(game.id, instruction) : api.createGame(instruction));
+        await api.iterateGame(game.id, buildGenerationPrompt(prompt, audience));
       } catch (error) {
         setMessages(previous);
         throw error;
       }
-      setGame(result.game);
-      setSourceHTML(result.game.html || '');
-      setMessages([
-        ...previous,
-        userMessage,
-        {
-          role: 'assistant',
-          content: result.reply || 'Игра готова. Попробуйте её в предпросмотре.',
-          version: result.version,
-        },
-      ]);
-      onChanged();
-      await reloadVersions(result.game.id);
+      setStage(STATUS.generating);
+      await applyBuild(await waitForBuild(game.id), game.version);
     });
   }
+
+  async function approve() {
+    if (isDemo || !isPlanStage(game)) {
+      return false;
+    }
+    return run('generate', async () => {
+      const result = await api.approvePlan(game.id);
+      setGame(result.game);
+      setPlan(null);
+      setStage(STATUS.generating);
+      await applyBuild(await waitForBuild(game.id), game.version);
+    });
+  }
+
   async function reloadVersions(id) {
     try {
       setVersions((await api.getVersions(id)) || []);
@@ -194,6 +307,8 @@ export function useGameEditor({
     html,
     messages,
     versions,
+    plan,
+    stage,
     options,
     setOptions,
     busy,
@@ -201,6 +316,7 @@ export function useGameEditor({
     reset,
     open,
     generate,
+    approve,
     restore,
     exportGame,
     updateGame,

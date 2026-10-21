@@ -23,7 +23,7 @@ export function PreviewFooter({
               : 'Начните с пары слов в чате'}
           </p>
         </div>
-        {game && <GameStatus published={!demo && game.published} />}
+        {game && <GameStatus published={!demo && game.published} status={!demo && game.status} />}
       </div>
       <div className="game-actions">
         <button

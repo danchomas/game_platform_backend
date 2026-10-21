@@ -211,6 +211,13 @@ p {
 .status.live > i {
   background: #91a775;
 }
+.status.working {
+  color: #9a8233;
+  background: #fbf5df;
+}
+.status.working > i {
+  background: #e0bf4f;
+}
 .button {
   display: inline-flex;
   align-items: center;
