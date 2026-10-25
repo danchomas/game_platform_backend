@@ -53,6 +53,8 @@ services:
     environment:
       DATABASE_URL: postgres://beeline:${POSTGRES_PASSWORD:-beeline}@db:5432/beeline?sslmode=disable
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?задайте OPENROUTER_API_KEY в .env}
+      # кодер: LLM_CODER_MODEL, если задан, иначе OPENROUTER_MODEL
+      LLM_CODER_MODEL: ${LLM_CODER_MODEL:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-haiku-5.5}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
       LLM_PLANNER_MODEL: ${LLM_PLANNER_MODEL:-deepseek/deepseek-v4.1-flash}

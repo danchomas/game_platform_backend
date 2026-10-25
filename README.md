@@ -29,9 +29,9 @@ gofmt -l -w . && go vet ./...
 | `JWT_SECRET` | — (обязательна) | ключ подписи токенов |
 | `OPENROUTER_API_KEY` | пусто | ключ OpenRouter; без него платформа работает, но генерация отвечает 503 |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | **базовый** адрес OpenAI-совместимого API, `/chat/completions` дописывается сам; сюда же можно подставить локальный сервер (`http://ollama:11434/v1`) |
-| `OPENROUTER_MODEL` | `anthropic/claude-haiku-5.5` | модель-кодер (пишет и правит игру), любой id с openrouter.ai/models |
+| `LLM_CODER_MODEL` | `anthropic/claude-haiku-5.5` | модель-кодер (пишет и правит игру), любой id с openrouter.ai/models; старое имя `OPENROUTER_MODEL` читается, если `LLM_CODER_MODEL` не задан |
 | `LLM_PLANNER_MODEL` | `deepseek/deepseek-v4.1-flash` | модель-планировщик (план игры, дешёвая) |
-| `LLM_FIXER_MODEL` | = `OPENROUTER_MODEL` | модель, исправляющая игру по найденным ошибкам |
+| `LLM_FIXER_MODEL` | = кодер | модель, исправляющая игру по найденным ошибкам |
 | `LLM_FALLBACK_MODELS` | пусто | запасные модели через запятую (поле `models` OpenRouter) |
 | `LLM_MAX_TOKENS` | `32000` | лимит ответа; оборванный ответ агент просит продолжить |
 | `MAX_FIX_ROUNDS` | `2` | кругов «тест → исправление» на одну сборку |

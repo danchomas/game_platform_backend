@@ -33,7 +33,8 @@ type Config struct {
 
 	OpenRouterBaseURL string
 	OpenRouterKey     string
-	// OpenRouterModel — модель-кодер (пишет и правит игру).
+	// OpenRouterModel — модель-кодер (пишет и правит игру): LLM_CODER_MODEL,
+	// при его отсутствии — OPENROUTER_MODEL (имя из main, оставлено для совместимости).
 	OpenRouterModel string
 
 	// Модели по ролям агента: планировщик дешевле кодера; исправитель по умолчанию = кодер.
@@ -64,7 +65,7 @@ func Load() (Config, error) {
 
 		OpenRouterBaseURL: env("OPENROUTER_BASE_URL", llm.DefaultBaseURL),
 		OpenRouterKey:     env("OPENROUTER_API_KEY", ""),
-		OpenRouterModel:   env("OPENROUTER_MODEL", defaultModel),
+		OpenRouterModel:   env("LLM_CODER_MODEL", env("OPENROUTER_MODEL", defaultModel)),
 
 		PlannerModel:   env("LLM_PLANNER_MODEL", defaultPlannerModel),
 		FallbackModels: envList("LLM_FALLBACK_MODELS"),
