@@ -30,6 +30,7 @@ export function useGameEditor({
   const [versions, setVersions] = useState([]);
   const [plan, setPlan] = useState(null);
   const [stage, setStage] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [options, setOptions] = useState({
     speed: 5,
     large: true,
@@ -54,6 +55,7 @@ export function useGameEditor({
     setVersions([]);
     setPlan(null);
     setStage(null);
+    setProgress(null);
   }
 
   // The ref locks synchronously, including two clicks before React has rendered the busy state.
@@ -77,6 +79,7 @@ export function useGameEditor({
       operationLock.current = false;
       setOperation(null);
       setStage(null);
+      setProgress(null);
     }
   }
 
@@ -94,6 +97,7 @@ export function useGameEditor({
         throw SUPERSEDED;
       }
       setStage(status.status);
+      setProgress(status.progress ? { ...status.progress, receivedAt: Date.now() } : null);
       if (status.game && isBusyStatus(status.status)) {
         setGame(status.game);
       }
@@ -309,6 +313,7 @@ export function useGameEditor({
     versions,
     plan,
     stage,
+    progress,
     options,
     setOptions,
     busy,

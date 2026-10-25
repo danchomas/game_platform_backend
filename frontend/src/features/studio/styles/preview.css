@@ -300,6 +300,9 @@
   font-size: 15px;
   z-index: 4;
 }
+.preview-bar {
+  width: min(260px, 70%);
+}
 .preview-busy small {
   font-size: 13px;
   color: #adb89b;

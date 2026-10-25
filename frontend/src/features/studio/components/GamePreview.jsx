@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { Spinner } from '../../../shared/ui/Spinner';
 import { EmptyState } from '../../../shared/ui/EmptyState';
 import { previewHTML } from '../previewHTML';
+import { describeProgress } from '../../games/pipelineStatus';
+import { useNow } from '../hooks/useNow';
 import { PreviewToolbar } from './PreviewToolbar';
 import { PreviewFooter } from './PreviewFooter';
 import { GameSettings } from './GameSettings';
@@ -16,9 +18,13 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
     setOptions,
     busy,
     generating,
+    stage,
+    progress,
     exportGame: onExport,
     restore: onRestore,
   } = editor;
+  const now = useNow(generating && Boolean(progress));
+  const live = generating ? describeProgress(stage, progress, now) : null;
   const [view, setView] = useState('preview');
   const [reload, setReload] = useState(0);
   const [panel, setPanel] = useState('');
@@ -74,9 +80,18 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
         {busy && (
           <div className="preview-busy">
             <Spinner />
-            <span>{generating ? 'Генерируем новую версию…' : 'Загружаем игру…'}</span>
+            <span>
+              {generating ? live?.activity || 'Генерируем новую версию' : 'Загружаем игру'}…
+            </span>
+            {live?.percent != null && (
+              <div className="gen-bar preview-bar" aria-hidden="true">
+                <i style={{ width: `${live.percent}%` }} />
+              </div>
+            )}
             <small>
-              {generating ? 'Это может занять до нескольких минут' : 'Подготавливаем предпросмотр'}
+              {generating
+                ? live?.time || 'Это может занять до нескольких минут'
+                : 'Подготавливаем предпросмотр'}
             </small>
           </div>
         )}

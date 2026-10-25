@@ -15,10 +15,42 @@ const plan = {
   summary: '• Тестовый план API: змейка\n• Управление свайпами',
 };
 
-// Walks the fixture game through the server pipeline stages, as the real background build does.
+// Walks the fixture game through the server pipeline stages, as the real background build does:
+// a few seconds of "thinking", then code is written with @step markers, then checks.
+const CODING_MS = Number(process.env.QA_CODING_MS || 12000);
+const THINK_MS = 2000;
+const EXPECTED_CHARS = 24000;
+const STEPS = [
+  'Оформление',
+  'Рисуем игровое поле',
+  'Управление свайпами',
+  'Звуки и эффекты',
+  'Экран победы',
+];
+let buildStartedAt = 0;
+
+function progress() {
+  const elapsed = Date.now() - buildStartedAt;
+  const base = { elapsed_ms: elapsed, expected_ms: CODING_MS + 3000 };
+  if (game.status !== 'generating') {
+    return base;
+  }
+  const writing = Math.max(0, elapsed - THINK_MS);
+  const share = Math.min(1, writing / (CODING_MS - THINK_MS));
+  const chars = Math.round(EXPECTED_CHARS * share);
+  const step = chars ? STEPS[Math.min(STEPS.length - 1, Math.floor(share * STEPS.length))] : '';
+  return { ...base, role: 'coder', phase_ms: writing, chars, expected_chars: EXPECTED_CHARS, step };
+}
+
 function startBuild(reply) {
-  const stages = ['generating', 'validating', 'testing', 'ready'];
-  stages.forEach((status, index) =>
+  buildStartedAt = Date.now();
+  game.status = 'generating';
+  const stages = [
+    ['validating', CODING_MS],
+    ['testing', CODING_MS + 1000],
+    ['ready', CODING_MS + 3000],
+  ];
+  stages.forEach(([status, at]) =>
     setTimeout(() => {
       game.status = status;
       if (status === 'ready') {
@@ -27,7 +59,7 @@ function startBuild(reply) {
         messages.push({ role: 'assistant', content: reply, version: game.version });
         versions.unshift({ version: game.version, instruction: messages.at(-2)?.content || '' });
       }
-    }, 700 * index),
+    }, at),
   );
 }
 const server = http.createServer(async (req, res) => {
@@ -99,6 +131,7 @@ const server = http.createServer(async (req, res) => {
       game_id: game.id,
       status: game.status,
       version: game.version,
+      progress: game.status === 'ready' ? undefined : progress(),
       game: { ...game, html: undefined },
     });
     return;

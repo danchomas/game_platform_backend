@@ -1,10 +1,46 @@
 import { useEffect, useRef } from 'react';
 import { ArrowUpRight, Sparkles, Check } from 'lucide-react';
 import { GenerationSteps as Steps } from '../../../shared/ui/GenerationSteps';
-import { STATUS, getBuildSteps } from '../../games/pipelineStatus';
+import { STATUS, describeProgress, getBuildSteps } from '../../games/pipelineStatus';
+import { useNow } from '../hooks/useNow';
 import { PlanCard } from './PlanCard';
 
-function ProgressNote({ stage }) {
+// Live build progress: what the model is writing now, how much is done and how long is left.
+function LiveProgress({ stage, progress }) {
+  const now = useNow(Boolean(progress));
+  const info = describeProgress(stage, progress, now);
+  if (!info) {
+    return (
+      <p>
+        Собираю игру и проверяю её в мобильном браузере.
+        <br />
+        Обычно это 1–3 минуты.
+      </p>
+    );
+  }
+  return (
+    <div className="gen-live">
+      <div className="gen-live-head">
+        <strong>{info.activity}…</strong>
+        <span>{info.time}</span>
+      </div>
+      {info.percent !== null && (
+        <div
+          className="gen-bar"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={info.percent}
+        >
+          <i style={{ width: `${info.percent}%` }} />
+        </div>
+      )}
+      {info.written && <small>{info.written}</small>}
+    </div>
+  );
+}
+
+function ProgressNote({ stage, progress }) {
   if (stage === STATUS.planning) {
     return (
       <p>
@@ -16,17 +52,22 @@ function ProgressNote({ stage }) {
   }
   return (
     <>
-      <p>
-        Собираю игру и проверяю её в мобильном браузере.
-        <br />
-        Обычно это 1–3 минуты.
-      </p>
+      <LiveProgress stage={stage} progress={progress} />
       <Steps steps={getBuildSteps(stage)} />
     </>
   );
 }
 
-export function ChatMessages({ messages, demo, busy, generating, stage, plan, onApprove }) {
+export function ChatMessages({
+  messages,
+  demo,
+  busy,
+  generating,
+  stage,
+  progress,
+  plan,
+  onApprove,
+}) {
   const end = useRef(null);
   useEffect(() => {
     end.current?.scrollIntoView({
@@ -92,7 +133,7 @@ export function ChatMessages({ messages, demo, busy, generating, stage, plan, on
               <i />
               <i />
             </div>
-            <ProgressNote stage={stage} />
+            <ProgressNote stage={stage} progress={progress} />
           </div>
         </div>
       )}
