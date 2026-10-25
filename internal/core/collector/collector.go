@@ -11,20 +11,20 @@ import (
 )
 
 type Event struct {
-	GameID		string
-	SessionID	string
-	PlayerID	string
-	Type		string
-	Result		string
-	Score		*float64
-	DurationMs	*int64
-	Payload		[]byte
+	GameID     string
+	SessionID  string
+	PlayerID   string
+	Type       string
+	Result     string
+	Score      *float64
+	DurationMs *int64
+	Payload    []byte
 }
 
 type Collector struct {
-	pool	*pgxpool.Pool
-	ch	chan Event
-	Dropped	atomic.Int64
+	pool    *pgxpool.Pool
+	ch      chan Event
+	Dropped atomic.Int64
 }
 
 func New(pool *pgxpool.Pool, buffer int) *Collector {
@@ -40,8 +40,8 @@ func (c *Collector) Add(e Event) {
 }
 
 const (
-	maxBatch	= 1000
-	interval	= 500 * time.Millisecond
+	maxBatch = 1000
+	interval = 500 * time.Millisecond
 )
 
 func (c *Collector) Run(ctx context.Context) {

@@ -2,15 +2,22 @@ package domain
 
 import "time"
 
+const (
+	RoleManager = "manager"
+	RolePlayer  = "player"
+)
+
 type User struct {
-	ID		string		`json:"id"`
-	Name		string		`json:"name"`
-	Role		string		`json:"role"`
-	CreatedAt	time.Time	`json:"created_at"`
+	ID        string
+	Name      string
+	Role      string
+	CreatedAt time.Time
 }
 
+func (u User) IsManager() bool { return u.Role == RoleManager }
+
 type AuthResult struct {
-	User		User	`json:"user"`
-	Token		string	`json:"token"`
-	AccessKey	string	`json:"access_key,omitempty"`
+	User      User
+	Token     string
+	AccessKey string
 }

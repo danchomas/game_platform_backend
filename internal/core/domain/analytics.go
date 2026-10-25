@@ -3,27 +3,32 @@ package domain
 import "time"
 
 type Filter struct {
-	OwnerID	string
-	GameID	string
-	From	time.Time
-	To	time.Time
+	OwnerID string
+	GameID  string
+	From    time.Time
+	To      time.Time
 }
 
+const (
+	ScopeMine = "mine"
+	ScopeAll  = "all"
+)
+
 type Summary struct {
-	Sessions		int64	`json:"sessions"`
-	Players			int64	`json:"players"`
-	ReturningPlayers	int64	`json:"returning_players"`
-	Engaged			int64	`json:"engaged_sessions"`
-	Starts			int64	`json:"game_starts"`
-	Ends			int64	`json:"game_ends"`
-	Wins			int64	`json:"wins"`
-	Losses			int64	`json:"losses"`
-	AvgSessionSec		float64	`json:"avg_session_sec"`
-	AvgScore		float64	`json:"avg_score"`
-	MaxScore		float64	`json:"max_score"`
-	EngagementRate		float64	`json:"engagement_rate"`
-	CompletionRate		float64	`json:"completion_rate"`
-	WinRate			float64	`json:"win_rate"`
+	Sessions         int64
+	Players          int64
+	ReturningPlayers int64
+	Engaged          int64
+	Starts           int64
+	Ends             int64
+	Wins             int64
+	Losses           int64
+	AvgSessionSec    float64
+	AvgScore         float64
+	MaxScore         float64
+	EngagementRate   float64
+	CompletionRate   float64
+	WinRate          float64
 }
 
 func (s *Summary) Derive() {
@@ -39,38 +44,48 @@ func (s *Summary) Derive() {
 }
 
 type DayPoint struct {
-	Day		string	`json:"day"`
-	Sessions	int64	`json:"sessions"`
-	Starts		int64	`json:"game_starts"`
-	Wins		int64	`json:"wins"`
-	Losses		int64	`json:"losses"`
+	Day      string
+	Sessions int64
+	Starts   int64
+	Wins     int64
+	Losses   int64
 }
 
 type GameRow struct {
-	ID		string	`json:"id"`
-	Title		string	`json:"title"`
-	Genre		string	`json:"genre"`
-	Published	bool	`json:"published"`
-	Plays		int64	`json:"plays_total"`
+	ID        string
+	Title     string
+	Genre     string
+	Published bool
+	Plays     int64
 	Summary
 }
 
 type EventCount struct {
-	Type		string	`json:"type"`
-	Count		int64	`json:"count"`
-	Sessions	int64	`json:"sessions"`
+	Type     string
+	Count    int64
+	Sessions int64
 }
 
 type Bucket struct {
-	Label	string	`json:"label"`
-	Count	int64	`json:"count"`
+	Label string
+	Count int64
 }
 
 type Insight struct {
-	Title		string
-	Genre		string
-	Audience	string
-	Sessions	int64
-	AvgSessionSec	float64
-	WinRate		float64
+	Title         string
+	Genre         string
+	Audience      string
+	Sessions      int64
+	AvgSessionSec float64
+	WinRate       float64
+}
+
+type Dashboard struct {
+	Scope           string
+	Days            int
+	Summary         Summary
+	Daily           []DayPoint
+	Games           []GameRow
+	CustomEvents    []EventCount
+	SessionDuration []Bucket
 }
