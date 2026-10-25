@@ -4,48 +4,51 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
 	"beeline-games/internal/core/jwt"
 )
 
-const tokenTTL = 30 * 24 * time.Hour
-
-func (s *service) CreateUser(ctx context.Context, name, role, managerCode string) (domain.AuthResult, error) {
+func (s *Service) CreateUser(ctx context.Context, name, role, managerCode string) (domain.AuthResult, error) {
 	name = strings.TrimSpace(name)
-	if n := utf8.RuneCountInString(name); n < 2 || n > 40 {
-		return domain.AuthResult{}, coreErrs.ErrInvalidInput
+	if n := utf8.RuneCountInString(name); n < minNameLen || n > maxNameLen {
+		return domain.AuthResult{}, apperr.NewValidationError("name",
+			fmt.Sprintf("имя: от %d до %d символов", minNameLen, maxNameLen))
 	}
 
-	actualRole := "player"
-	if role == "manager" {
+	actualRole := domain.RolePlayer
+	if role == domain.RoleManager {
 		if s.managerCode != "" && managerCode != s.managerCode {
-			return domain.AuthResult{}, coreErrs.ErrForbidden
+			return domain.AuthResult{}, fmt.Errorf("неверный код менеджера: %w", apperr.ErrForbidden)
 		}
-		actualRole = "manager"
+		actualRole = domain.RoleManager
 	}
 
-	accessKey := randomKey()
+	accessKey, err := randomKey()
+	if err != nil {
+		return domain.AuthResult{}, err
+	}
+
 	u, err := s.repo.SaveUser(ctx, name, actualRole, accessKey)
 	if err != nil {
 		return domain.AuthResult{}, err
 	}
 
-	token := jwt.Issue(s.jwtSecret, u.ID, u.Role, tokenTTL)
-
 	return domain.AuthResult{
-		User:		u,
-		Token:		token,
-		AccessKey:	accessKey,
+		User:      u,
+		Token:     jwt.Issue(s.jwtSecret, u.ID, u.Role, tokenTTL),
+		AccessKey: accessKey,
 	}, nil
 }
 
-func randomKey() string {
+func randomKey() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("генерация кода доступа: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }

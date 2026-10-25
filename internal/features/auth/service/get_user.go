@@ -2,24 +2,34 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
 	"beeline-games/internal/core/jwt"
 )
 
-func (s *service) LoginUser(ctx context.Context, accessKey string) (domain.AuthResult, error) {
+func (s *Service) LoginUser(ctx context.Context, accessKey string) (domain.AuthResult, error) {
 	accessKey = strings.TrimSpace(accessKey)
-	u, err := s.repo.GetUserByAccessKey(ctx, accessKey)
-	if err != nil {
-		return domain.AuthResult{}, coreErrs.ErrUnauthorized
+	if accessKey == "" {
+		return domain.AuthResult{}, apperr.ErrUnauthorized
 	}
 
-	token := jwt.Issue(s.jwtSecret, u.ID, u.Role, tokenTTL)
-	return domain.AuthResult{User: u, Token: token}, nil
+	u, err := s.repo.GetUserByAccessKey(ctx, accessKey)
+	if errors.Is(err, apperr.ErrNotFound) {
+		return domain.AuthResult{}, apperr.ErrUnauthorized
+	}
+	if err != nil {
+		return domain.AuthResult{}, err
+	}
+
+	return domain.AuthResult{
+		User:  u,
+		Token: jwt.Issue(s.jwtSecret, u.ID, u.Role, tokenTTL),
+	}, nil
 }
 
-func (s *service) GetUser(ctx context.Context, id string) (domain.User, error) {
+func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
 	return s.repo.GetUserByID(ctx, id)
 }
