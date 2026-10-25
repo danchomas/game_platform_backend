@@ -18,6 +18,7 @@
 - `config`: `LLM_PLANNER_MODEL`, `LLM_FIXER_MODEL`, `LLM_FALLBACK_MODELS`, `LLM_MAX_TOKENS`, `MAX_FIX_ROUNDS`, `BROWSER_*`; кодер по умолчанию `claude-haiku-5.5` (бюджет), `LLM_TIMEOUT_SEC` 240.
 - `migrations/000002_agent_pipeline`, compose-сервис `browser` (chromedp/headless-shell), `frontend/nginx.conf` — `proxy_buffering off` для SSE.
 - `go.mod`: `chromedp v0.14.2` (v0.21 сменил API на generic — не обновлять вслепую).
+- `frontend/src/**/*.css`: шкала шрифтов поднята под монитор 1080p (было 7–10px на основном тексте, стало 13–15px; минимум 11px, в т.ч. в медиа-запросах для узких экранов); заголовки ≥ 26px не менялись. Боковое меню шире (272px), чтобы пункты не переносились. Проверено на 1920×1080, 1366×768 и 375×812: без обрезаний и горизонтальной прокрутки.
 - `scripts/smoke.sh`: под план → сборку; проверка порядка SDK теперь ищет `data-gamekit` (GameKit сам создаёт `<canvas>`).
 
 ## Проверено

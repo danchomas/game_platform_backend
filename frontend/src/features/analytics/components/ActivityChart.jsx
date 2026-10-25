@@ -79,7 +79,7 @@ export function ActivityChart({ daily = [], loading, days }) {
                     stroke="#eeeee9"
                     strokeDasharray="3 5"
                   />
-                  <text x="0" y={194 - fraction * 155} fill="#a2a49a" fontSize="11">
+                  <text x="0" y={194 - fraction * 155} fill="#a2a49a" fontSize="13">
                     {formatNumber(Math.round(max * fraction))}
                   </text>
                 </g>
@@ -97,7 +97,7 @@ export function ActivityChart({ daily = [], loading, days }) {
                   {(index === 0 ||
                     index === chart.length - 1 ||
                     index % Math.ceil(chart.length / 6) === 0) && (
-                    <text x={point.x} y="222" textAnchor="middle" fill="#999c91" fontSize="11">
+                    <text x={point.x} y="222" textAnchor="middle" fill="#999c91" fontSize="13">
                       {formatDay(point.day)}
                     </text>
                   )}
@@ -140,7 +140,7 @@ export function ActivityChart({ daily = [], loading, days }) {
                   <text
                     x={Math.min(Math.max(hover.x - 61, 42), 770) + 62}
                     y="18"
-                    fontSize="11"
+                    fontSize="13"
                     textAnchor="middle"
                     fill="white"
                   >

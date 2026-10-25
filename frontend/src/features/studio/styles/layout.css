@@ -58,7 +58,7 @@
     flex: 1;
     padding: 8px;
     border-radius: 7px;
-    font-size: 12px;
+    font-size: 15px;
     color: #7b856e;
   }
   .studio-mobile-tabs button[aria-pressed='true'] {
