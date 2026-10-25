@@ -46,10 +46,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       MANAGER_CODE: ${MANAGER_CODE:-}
       MAX_CONCURRENT_GEN: ${MAX_CONCURRENT_GEN:-8}
-      WEB_DIR: /app/web
+      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-180}
+      OPENROUTER_URL: ${OPENROUTER_URL:-}
       PROXY_URL: ${PROXY_URL:-}
-    volumes:
-      - ./web:/app/web:ro
 
 volumes:
   pgdata:

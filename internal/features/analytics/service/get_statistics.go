@@ -4,109 +4,109 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
 )
 
-func par(fns ...func() error) error {
-	var wg sync.WaitGroup
-	errs := make([]error, len(fns))
-	for i, f := range fns {
-		wg.Add(1)
-		go func(idx int, fn func() error) {
-			defer wg.Done()
-			errs[idx] = fn()
-		}(i, f)
-	}
-	wg.Wait()
-	for _, e := range errs {
-		if e != nil {
-			return e
-		}
-	}
-	return nil
-}
-
-func dateRange(days int) (time.Time, time.Time) {
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	return today.AddDate(0, 0, -(days - 1)), today.AddDate(0, 0, 1)
-}
-
-func (s *service) GetOverview(ctx context.Context, userID, role, scope string, days int) (DashboardData, error) {
+func (s *Service) GetOverview(ctx context.Context, userID, role, scope string, days int) (domain.Dashboard, error) {
+	days = clampDays(days)
 	from, to := dateRange(days)
-	f := domain.Filter{From: from, To: to}
 
-	actualScope := "mine"
-	if scope == "all" {
-		if role != "manager" {
-			return DashboardData{}, coreErrs.ErrForbidden
+	f := domain.Filter{From: from, To: to}
+	actualScope := domain.ScopeMine
+
+	if scope == domain.ScopeAll {
+		if role != domain.RoleManager {
+			return domain.Dashboard{}, fmt.Errorf("общая аналитика доступна только менеджерам: %w", apperr.ErrForbidden)
 		}
-		actualScope = "all"
+		actualScope = domain.ScopeAll
 	} else {
 		f.OwnerID = userID
 	}
 
-	var data DashboardData
-	data.Scope = actualScope
-	data.Days = days
+	data := domain.Dashboard{Scope: actualScope, Days: days}
 
-	err := par(
-		func() (e error) { data.Summary, e = s.repo.Summary(ctx, f); return },
-		func() (e error) { data.Daily, e = s.repo.Daily(ctx, f); return },
-		func() (e error) { data.Games, e = s.repo.PerGame(ctx, f); return },
-		func() (e error) { data.CustomEvents, e = s.repo.CustomEvents(ctx, f); return },
-		func() (e error) { data.SessionDuration, e = s.repo.DurationBuckets(ctx, f); return },
-	)
-	if err != nil {
-		return DashboardData{}, err
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { data.Summary, err = s.repo.Summary(gctx, f); return })
+	g.Go(func() (err error) { data.Daily, err = s.repo.Daily(gctx, f); return })
+	g.Go(func() (err error) { data.Games, err = s.repo.PerGame(gctx, f); return })
+	g.Go(func() (err error) { data.CustomEvents, err = s.repo.CustomEvents(gctx, f); return })
+	g.Go(func() (err error) { data.SessionDuration, err = s.repo.DurationBuckets(gctx, f); return })
+
+	if err := g.Wait(); err != nil {
+		return domain.Dashboard{}, err
 	}
 	return data, nil
 }
 
-func (s *service) GetGameAnalytics(ctx context.Context, userID, role, gameID string, days int) (DashboardData, error) {
+func (s *Service) GetGameAnalytics(ctx context.Context, userID, role, gameID string, days int) (domain.Dashboard, error) {
+	if err := s.authorizeGame(ctx, userID, role, gameID); err != nil {
+		return domain.Dashboard{}, err
+	}
 
+	days = clampDays(days)
 	from, to := dateRange(days)
 	f := domain.Filter{From: from, To: to, GameID: gameID}
 
-	var data DashboardData
-	data.Days = days
+	data := domain.Dashboard{Scope: domain.ScopeMine, Days: days}
 
-	err := par(
-		func() (e error) { data.Summary, e = s.repo.Summary(ctx, f); return },
-		func() (e error) { data.Daily, e = s.repo.Daily(ctx, f); return },
-		func() (e error) { data.CustomEvents, e = s.repo.CustomEvents(ctx, f); return },
-		func() (e error) { data.SessionDuration, e = s.repo.DurationBuckets(ctx, f); return },
-	)
-	if err != nil {
-		return DashboardData{}, err
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { data.Summary, err = s.repo.Summary(gctx, f); return })
+	g.Go(func() (err error) { data.Daily, err = s.repo.Daily(gctx, f); return })
+	g.Go(func() (err error) { data.CustomEvents, err = s.repo.CustomEvents(gctx, f); return })
+	g.Go(func() (err error) { data.SessionDuration, err = s.repo.DurationBuckets(gctx, f); return })
+
+	if err := g.Wait(); err != nil {
+		return domain.Dashboard{}, err
 	}
 	return data, nil
 }
 
-func (s *service) GetInsightsHint(ctx context.Context) string {
+func (s *Service) authorizeGame(ctx context.Context, userID, role, gameID string) error {
+	if role == domain.RoleManager {
+		return nil
+	}
+
+	owned, err := s.games.CheckOwnership(ctx, userID, gameID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return apperr.ErrForbidden
+	}
+	return nil
+}
+
+func (s *Service) GetInsightsHint(ctx context.Context) string {
 	s.hintMu.Lock()
 	defer s.hintMu.Unlock()
 
 	if time.Now().Before(s.hintExp) {
 		return s.hint
 	}
+	s.hintExp = time.Now().Add(hintTTL)
 
-	s.hintExp = time.Now().Add(5 * time.Minute)
-	ins, err := s.repo.TopInsights(ctx, 3)
-	if err != nil || len(ins) == 0 {
+	insights, err := s.repo.TopInsights(ctx, hintGames)
+	if err != nil || len(insights) == 0 {
 		s.hint = ""
 		return ""
 	}
 
 	var b strings.Builder
-	for _, in := range ins {
-		fmt.Fprintf(&b, "- \"%s\" (genre: %s, audience: %s): %d sessions, avg session %.0fs, win rate %.0f%%\n",
+	for _, in := range insights {
+		fmt.Fprintf(&b, "- %q (genre: %s, audience: %s): %d sessions, avg session %.0fs, win rate %.0f%%\n",
 			in.Title, in.Genre, in.Audience, in.Sessions, in.AvgSessionSec, in.WinRate*100)
 	}
 	s.hint = b.String()
 	return s.hint
+}
+
+func dateRange(days int) (from, to time.Time) {
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return today.AddDate(0, 0, -(days - 1)), today.AddDate(0, 0, 1)
 }

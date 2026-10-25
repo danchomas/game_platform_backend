@@ -1,86 +1,62 @@
 package http
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"net/http"
-	"strings"
 
-	coreErrs "beeline-games/internal/core/errors"
-	"beeline-games/internal/core/llm"
 	"beeline-games/internal/core/transport/http/request"
 	"beeline-games/internal/core/transport/http/response"
 )
 
-type promptReq struct {
-	Prompt string `json:"prompt"`
-}
-
-type chatReq struct {
-	Content string `json:"content"`
-}
-
 func (h *Handler) CreateGame(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
+	userID, err := request.RequireUserID(r)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
 
-	var in promptReq
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		response.Error(w, http.StatusBadRequest, "некорректный JSON")
+	var in promptRequest
+	if err := request.Decode(r, &in); err != nil {
+		response.Error(w, r, err)
 		return
 	}
 
 	game, reply, version, err := h.svc.CreateAndGenerate(r.Context(), userID, in.Prompt)
 	if err != nil {
-		handleGenErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
 
-	response.JSON(w, http.StatusCreated, map[string]any{
-		"game":		game,
-		"reply":	reply,
-		"version":	version,
-	})
+	response.JSON(w, http.StatusCreated, h.toGenerationDTO(game, reply, version))
 }
 
 func (h *Handler) IterateGame(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	gameID := r.PathValue("id")
+	userID, gameID, err := h.callerAndGame(r)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
 
-	var in chatReq
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		response.Error(w, http.StatusBadRequest, "некорректный JSON")
+	var in messageRequest
+	if err := request.Decode(r, &in); err != nil {
+		response.Error(w, r, err)
 		return
 	}
 
 	game, reply, version, err := h.svc.IterateGame(r.Context(), userID, gameID, in.Content)
 	if err != nil {
-		if errors.Is(err, coreErrs.ErrForbidden) && game.ID == "" {
-			response.Error(w, http.StatusConflict, "для этой игры уже идёт генерация")
-			return
-		}
-		handleGenErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]any{
-		"game":		game,
-		"reply":	reply,
-		"version":	version,
-	})
+	response.JSON(w, http.StatusOK, h.toGenerationDTO(game, reply, version))
 }
 
-func handleGenErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, coreErrs.ErrInvalidInput):
-		response.Error(w, http.StatusBadRequest, "текст: от 3 до 4000 символов")
-	case errors.Is(err, llm.ErrNoKey), strings.Contains(err.Error(), "сервер занят"):
-		response.Error(w, http.StatusServiceUnavailable, err.Error())
-	case errors.Is(err, context.Canceled):
-		response.Error(w, 499, "запрос отменён")
-	default:
-		response.Error(w, http.StatusBadGateway, "ИИ не смог сгенерировать игру: "+err.Error())
+func (h *Handler) callerAndGame(r *http.Request) (userID, gameID string, err error) {
+	if userID, err = request.RequireUserID(r); err != nil {
+		return "", "", err
 	}
+	if gameID, err = request.PathID(r, "id"); err != nil {
+		return "", "", err
+	}
+	return userID, gameID, nil
 }

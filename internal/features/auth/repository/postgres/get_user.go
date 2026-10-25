@@ -1,34 +1,34 @@
 package postgres
 
 import (
-	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"beeline-games/internal/core/apperr"
+	"beeline-games/internal/core/domain"
 )
 
-func (r *repository) GetUserByAccessKey(ctx context.Context, key string) (domain.User, error) {
-	var u domain.User
-	err := r.pool.QueryRow(ctx,
-		`SELECT id,name,role,created_at FROM users WHERE access_key=$1`, key).
-		Scan(&u.ID, &u.Name, &u.Role, &u.CreatedAt)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, coreErrs.ErrNotFound
-	}
-	return u, err
+func (r *Repository) GetUserByAccessKey(ctx context.Context, key string) (domain.User, error) {
+	return r.queryUser(ctx, `SELECT id,name,role,created_at FROM users WHERE access_key=$1`, key)
 }
 
-func (r *repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
+func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
+	return r.queryUser(ctx, `SELECT id,name,role,created_at FROM users WHERE id=$1`, id)
+}
+
+func (r *Repository) queryUser(ctx context.Context, query string, arg any) (domain.User, error) {
 	var u domain.User
-	err := r.pool.QueryRow(ctx,
-		`SELECT id,name,role,created_at FROM users WHERE id=$1`, id).
+	err := r.pool.QueryRow(ctx, query, arg).
 		Scan(&u.ID, &u.Name, &u.Role, &u.CreatedAt)
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, coreErrs.ErrNotFound
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return domain.User{}, apperr.ErrNotFound
+	case err != nil:
+		return domain.User{}, fmt.Errorf("чтение пользователя: %w", err)
 	}
-	return u, err
+	return u, nil
 }

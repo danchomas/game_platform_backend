@@ -1,25 +1,20 @@
 package http
 
 import (
-	"beeline-games/internal/features/analytics/service"
-	"context"
 	"net/http"
+
+	"beeline-games/internal/core/transport/http/middleware"
 )
 
-type GamesProvider interface {
-	CheckOwnership(ctx context.Context, userID, gameID string) (bool, error)
-}
-
 type Handler struct {
-	svc	service.Service
-	games	GamesProvider
+	svc Analytics
 }
 
-func NewHandler(svc service.Service, games GamesProvider) *Handler {
-	return &Handler{svc: svc, games: games}
+func NewHandler(svc Analytics) *Handler {
+	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMW func(http.HandlerFunc) http.HandlerFunc) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMW middleware.Middleware) {
 	mux.HandleFunc("GET /api/analytics/overview", authMW(h.Overview))
 	mux.HandleFunc("GET /api/analytics/games/{id}", authMW(h.GameAnalytics))
 }

@@ -3,41 +3,55 @@ package domain
 import "time"
 
 type Game struct {
-	ID		string		`json:"id"`
-	OwnerID		string		`json:"owner_id"`
-	OwnerName	string		`json:"owner_name"`
-	Title		string		`json:"title"`
-	Genre		string		`json:"genre"`
-	Audience	string		`json:"audience"`
-	Prompt		string		`json:"prompt"`
-	HTML		string		`json:"html,omitempty"`
-	Version		int		`json:"version"`
-	Published	bool		`json:"published"`
-	Plays		int64		`json:"plays"`
-	CreatedAt	time.Time	`json:"created_at"`
-	UpdatedAt	time.Time	`json:"updated_at"`
+	ID        string
+	OwnerID   string
+	OwnerName string
+	Title     string
+	Genre     string
+	Audience  string
+	Prompt    string
+	HTML      string
+	Version   int
+	Published bool
+	Plays     int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
+func (g Game) Generated() bool { return g.Version > 0 && g.HTML != "" }
+
 type Message struct {
-	ID		int64		`json:"id"`
-	Role		string		`json:"role"`
-	Content		string		`json:"content"`
-	Version		*int		`json:"version,omitempty"`
-	CreatedAt	time.Time	`json:"created_at"`
+	ID        int64
+	Role      string
+	Content   string
+	Version   *int
+	CreatedAt time.Time
 }
 
 type VersionInfo struct {
-	Version		int		`json:"version"`
-	Instruction	string		`json:"instruction"`
-	CreatedAt	time.Time	`json:"created_at"`
+	Version     int
+	Instruction string
+	CreatedAt   time.Time
 }
 
 type VersionInput struct {
-	GameID		string
-	UserText	string
-	Reply		string
-	HTML		string
-	Title		string
-	Genre		string
-	Audience	string
+	GameID   string
+	UserText string
+	Reply    string
+	HTML     string
+	Title    string
+	Genre    string
+	Audience string
 }
+
+type GameQuery struct {
+	Sort   string
+	Search string
+	Limit  int
+	Offset int
+}
+
+const (
+	SortNew     = "new"
+	SortPopular = "popular"
+)

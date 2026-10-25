@@ -1,59 +1,83 @@
 package service
 
 import (
-	"context"
 	"sync"
 	"time"
 
 	"beeline-games/internal/core/domain"
-	"beeline-games/internal/core/llm"
-	"beeline-games/internal/features/games/repository/postgres"
 )
 
-type LLMProvider interface {
-	Chat(ctx context.Context, msgs []llm.Msg) (string, error)
+const (
+	minPromptLen = 3
+	maxPromptLen = 4000
+
+	minTitleLen = 1
+	maxTitleLen = 80
+
+	defaultOwnerLimit   = 50
+	maxOwnerLimit       = 200
+	defaultGalleryLimit = 24
+	maxGalleryLimit     = 100
+	maxOffset           = 1 << 20
+
+	waitForSlot = 20 * time.Second
+)
+
+type Service struct {
+	repo       GameRepository
+	llm        LLMProvider
+	insights   InsightProvider
+	llmTimeout time.Duration
+
+	genSem   chan struct{}
+	inflight sync.Map
 }
 
-type InsightProvider interface {
-	GetInsightsHint(ctx context.Context) string
-}
-
-type Service interface {
-	CreateAndGenerate(ctx context.Context, ownerID, prompt string) (domain.Game, string, int, error)
-	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, string, int, error)
-
-	GetGame(ctx context.Context, userID, gameID string) (domain.Game, error)
-	GetMyGames(ctx context.Context, userID string, limit, offset int) ([]domain.Game, error)
-	GetGallery(ctx context.Context, sort, q string, limit, offset int) ([]domain.Game, error)
-
-	PatchGame(ctx context.Context, userID, gameID, title string) (domain.Game, error)
-	DeleteGame(ctx context.Context, userID, gameID string) error
-	PublishGame(ctx context.Context, userID, gameID string, publish bool) (domain.Game, error)
-
-	GetMessages(ctx context.Context, userID, gameID string) ([]domain.Message, error)
-	GetVersions(ctx context.Context, userID, gameID string) ([]domain.VersionInfo, error)
-	RestoreVersion(ctx context.Context, userID, gameID string, version int) (domain.Game, string, int, error)
-
-	IsPublished(ctx context.Context, gameID string) (bool, error)
-	CheckOwnership(ctx context.Context, userID, gameID string) (bool, error)
-}
-
-type service struct {
-	repo		postgres.Repository
-	llm		LLMProvider
-	insights	InsightProvider
-	llmTimeout	time.Duration
-
-	genSem		chan struct{}
-	inflight	sync.Map
-}
-
-func NewService(repo postgres.Repository, llmProv LLMProvider, insights InsightProvider, maxConcurrent int, llmTimeout time.Duration) Service {
-	return &service{
-		repo:		repo,
-		llm:		llmProv,
-		insights:	insights,
-		llmTimeout:	llmTimeout,
-		genSem:		make(chan struct{}, maxConcurrent),
+func NewService(repo GameRepository, model LLMProvider, insights InsightProvider, maxConcurrent int, llmTimeout time.Duration) *Service {
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
 	}
+	return &Service{
+		repo:       repo,
+		llm:        model,
+		insights:   insights,
+		llmTimeout: llmTimeout,
+		genSem:     make(chan struct{}, maxConcurrent),
+	}
+}
+
+func ownerQuery(limit, offset int) domain.GameQuery {
+	return domain.GameQuery{
+		Limit:  clamp(limit, 1, maxOwnerLimit, defaultOwnerLimit),
+		Offset: clamp(offset, 0, maxOffset, 0),
+	}
+}
+
+func galleryQuery(sort, search string, limit, offset int) domain.GameQuery {
+	if sort != domain.SortPopular {
+		sort = domain.SortNew
+	}
+	return domain.GameQuery{
+		Sort:   sort,
+		Search: search,
+		Limit:  clamp(limit, 1, maxGalleryLimit, defaultGalleryLimit),
+		Offset: clamp(offset, 0, maxOffset, 0),
+	}
+}
+
+func clamp(v, lo, hi, def int) int {
+	if v <= 0 {
+		v = def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func (s *Service) SetInsights(insights InsightProvider) {
+	s.insights = insights
 }
