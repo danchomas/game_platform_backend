@@ -3,95 +3,167 @@ package llm
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	"beeline-games/internal/core/apperr"
+)
+
+const DefaultBaseURL = "https://openrouter.ai/api/v1"
+
+const chatPath = "/chat/completions"
+
+const (
+	maxTokens   = 8000
+	temperature = 0.7
+
+	maxResponseBytes = 8 << 20
+
+	maxErrorSnippet = 300
+)
+
+const (
+	appTitle = "Beeline Vibe Games"
+	appURL   = "https://github.com/beeline-hackathon/vibe-games"
 )
 
 type Msg struct {
-	Role	string	`json:"role"`
-	Content	string	`json:"content"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type Client struct {
-	Key, Model, URL	string
-	HTTP		*http.Client
+	http    *http.Client
+	baseURL string
+	apiKey  string
+	model   string
 }
 
-func NewClient(key, model, endpoint, proxyStr string, timeout time.Duration) *Client {
-	client := &http.Client{Timeout: timeout}
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+func NewClient(apiKey, model, baseURL string, timeout time.Duration) *Client {
+	return &Client{
+		http:    &http.Client{Timeout: timeout},
+		baseURL: normalizeBaseURL(baseURL),
+		apiKey:  apiKey,
+		model:   model,
 	}
-
-	if proxyStr != "" {
-		if pURL, err := url.Parse(proxyStr); err == nil {
-			transport.Proxy = http.ProxyURL(pURL)
-		}
-	}
-	client.Transport = transport
-
-	return &Client{Key: key, Model: model, URL: endpoint, HTTP: client}
 }
 
-var ErrNoKey = errors.New("OPENROUTER_API_KEY не задан")
+func normalizeBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultBaseURL
+	}
+
+	raw = strings.TrimRight(raw, "/")
+	return strings.TrimSuffix(raw, chatPath)
+}
+
+func (c *Client) BaseURL() string { return c.baseURL }
+
+func (c *Client) Model() string { return c.model }
+
+var ErrNoKey = fmt.Errorf("%w: OPENROUTER_API_KEY не задан", apperr.ErrLLMUnavailable)
+
+type chatRequest struct {
+	Model       string  `json:"model"`
+	Messages    []Msg   `json:"messages"`
+	MaxTokens   int     `json:"max_tokens"`
+	Temperature float64 `json:"temperature"`
+}
+
+type chatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Code    any    `json:"code"`
+	} `json:"error"`
+}
 
 func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
-	if c.Key == "" {
+	if c.apiKey == "" {
 		return "", ErrNoKey
 	}
-	body, _ := json.Marshal(map[string]any{
-		"model":	c.Model,
-		"messages":	msgs,
-		"max_tokens":	8000,
-		"temperature":	0.7,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://github.com/beeline-hackathon/vibe-games")
-	req.Header.Set("X-Title", "Beeline Vibe Games")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 
-	resp, err := c.HTTP.Do(req)
+	body, err := json.Marshal(chatRequest{
+		Model:       c.model,
+		Messages:    msgs,
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("сборка запроса к модели: %w", err)
+	}
+
+	endpoint := c.baseURL + chatPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("%w: некорректный адрес %q: %v", apperr.ErrLLMUnavailable, endpoint, err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", appURL)
+	req.Header.Set("X-Title", appTitle)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: запрос к %s не прошёл: %v", apperr.ErrLLMUnavailable, c.baseURL, err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: ответ модели не дочитан: %v", apperr.ErrLLMUnavailable, err)
 	}
-	var out struct {
-		Choices	[]struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		}	`json:"choices"`
-		Error	*struct {
-			Message string `json:"message"`
-		}	`json:"error"`
-	}
+
+	return parseChatResponse(resp.StatusCode, raw)
+}
+
+func parseChatResponse(status int, raw []byte) (string, error) {
+	var out chatResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("openrouter: HTTP %d, не JSON: %.200s", resp.StatusCode, raw)
+		return "", fmt.Errorf("%w: HTTP %d, ответ не JSON: %s",
+			apperr.ErrLLMUnavailable, status, snippet(raw))
 	}
+
 	if out.Error != nil {
-		return "", fmt.Errorf("openrouter: %s", out.Error.Message)
+		return "", fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, out.Error.Message)
 	}
-	if resp.StatusCode >= 300 || len(out.Choices) == 0 {
-		return "", fmt.Errorf("openrouter: HTTP %d, пустой ответ", resp.StatusCode)
+	if status != http.StatusOK {
+		return "", fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, snippet(raw))
 	}
-	return out.Choices[0].Message.Content, nil
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("%w: модель вернула пустой список вариантов", apperr.ErrLLMFailed)
+	}
+
+	content := out.Choices[0].Message.Content
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
+			apperr.ErrLLMFailed, out.Choices[0].FinishReason)
+	}
+
+	return content, nil
+}
+
+func snippet(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > maxErrorSnippet {
+		return s[:maxErrorSnippet] + "…"
+	}
+	return s
 }
 
 type Result struct {
