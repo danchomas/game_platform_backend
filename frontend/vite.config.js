@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
           proxyTimeout: 240000,
         },
         '/g': { target: env.API_PROXY_TARGET || 'http://127.0.0.1:8080', changeOrigin: true },
+        '/e': { target: env.API_PROXY_TARGET || 'http://127.0.0.1:8080', changeOrigin: true },
         '/healthz': { target: env.API_PROXY_TARGET || 'http://127.0.0.1:8080', changeOrigin: true },
       },
     },
