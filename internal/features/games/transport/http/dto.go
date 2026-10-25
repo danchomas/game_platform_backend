@@ -139,11 +139,24 @@ type acceptedDTO struct {
 }
 
 type statusDTO struct {
-	GameID  string    `json:"game_id"`
-	Status  string    `json:"status"`
-	Detail  string    `json:"detail,omitempty"`
-	Version int       `json:"version,omitempty"`
-	At      time.Time `json:"at"`
+	GameID   string       `json:"game_id"`
+	Status   string       `json:"status"`
+	Detail   string       `json:"detail,omitempty"`
+	Version  int          `json:"version,omitempty"`
+	At       time.Time    `json:"at"`
+	Progress *progressDTO `json:"progress,omitempty"`
+}
+
+// progressDTO — ход сборки. Длительности считаются на сервере, чтобы не зависеть от часов клиента.
+type progressDTO struct {
+	ElapsedMs  int64 `json:"elapsed_ms"`
+	ExpectedMs int64 `json:"expected_ms"`
+	// Role: coder — пишется код, fixer — исправляется; пусто — проверки без модели
+	Role          string `json:"role,omitempty"`
+	PhaseMs       int64  `json:"phase_ms,omitempty"`
+	Chars         int    `json:"chars"`
+	ExpectedChars int    `json:"expected_chars,omitempty"`
+	Step          string `json:"step,omitempty"`
 }
 
 // statusWithGameDTO — ответ /status: после фоновой сборки клиенту нужна новая карточка игры.
@@ -162,6 +175,7 @@ type llmCallDTO struct {
 	LatencyMs        int64   `json:"latency_ms"`
 	FinishReason     string  `json:"finish_reason"`
 	Error            string  `json:"error,omitempty"`
+	OutputChars      int     `json:"output_chars"`
 }
 
 type generationItemDTO struct {
@@ -227,7 +241,23 @@ func (h *Handler) toPlanDTO(g domain.Game, p domain.Plan) planDTO {
 }
 
 func toStatusDTO(e domain.StatusEvent) statusDTO {
-	return statusDTO{GameID: e.GameID, Status: e.Status, Detail: e.Detail, Version: e.Version, At: e.At}
+	return statusDTO{GameID: e.GameID, Status: e.Status, Detail: e.Detail, Version: e.Version, At: e.At,
+		Progress: toProgressDTO(e.Progress)}
+}
+
+func toProgressDTO(p *domain.BuildProgress) *progressDTO {
+	if p == nil {
+		return nil
+	}
+	now := time.Now()
+	out := &progressDTO{
+		ElapsedMs: now.Sub(p.StartedAt).Milliseconds(), ExpectedMs: p.ExpectedMs,
+		Role: p.Role, Chars: p.Chars, ExpectedChars: p.ExpectedChars, Step: p.Step,
+	}
+	if p.Role != "" && !p.PhaseStartedAt.IsZero() {
+		out.PhaseMs = now.Sub(p.PhaseStartedAt).Milliseconds()
+	}
+	return out
 }
 
 func gameStatus(g domain.Game) domain.StatusEvent {

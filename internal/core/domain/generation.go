@@ -71,6 +71,30 @@ type StatusEvent struct {
 	Detail  string
 	Version int
 	At      time.Time
+	// Progress — только пока идёт сборка
+	Progress *BuildProgress
+}
+
+// BuildProgress — ход фоновой сборки для экрана ожидания. Живёт в памяти процесса.
+type BuildProgress struct {
+	StartedAt time.Time
+	// ExpectedMs — обычная длительность такой сборки по истории
+	ExpectedMs int64
+	// Role — кто сейчас пишет код: coder или fixer; пусто — идут проверки
+	Role string
+	// PhaseStartedAt — когда модель начала писать текущий ответ: по нему считается скорость
+	PhaseStartedAt time.Time
+	Chars          int
+	ExpectedChars  int
+	// Step — последняя метка «// @step …» из кода, который пишет модель
+	Step string
+}
+
+// BuildEstimate — обычные длительность сборки и размер кода по прошлым удачным сборкам.
+type BuildEstimate struct {
+	Samples    int
+	DurationMs int64
+	CoderChars int
 }
 
 type Plan struct {
@@ -90,6 +114,8 @@ type LLMCall struct {
 	LatencyMs       int64
 	FinishReason    string
 	Error           string
+	// OutputChars — длина ответа в байтах: по ней оценивается прогресс следующих сборок
+	OutputChars int
 }
 
 // Generation — один запуск агента (план, сборка или правка) со всей телеметрией.

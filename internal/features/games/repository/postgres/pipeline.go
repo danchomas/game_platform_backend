@@ -114,10 +114,10 @@ func (r *Repository) FinishGeneration(ctx context.Context, g domain.GenerationRe
 	if len(g.Calls) > 0 {
 		rows := make([][]any, 0, len(g.Calls))
 		for _, c := range g.Calls {
-			rows = append(rows, []any{g.ID, c.Role, c.Model, c.PromptTokens, c.CompletionTokens, c.ReasoningTokens, c.CostUSD, c.LatencyMs, c.FinishReason, c.Error})
+			rows = append(rows, []any{g.ID, c.Role, c.Model, c.PromptTokens, c.CompletionTokens, c.ReasoningTokens, c.CostUSD, c.LatencyMs, c.FinishReason, c.Error, c.OutputChars})
 		}
 		_, err = tx.CopyFrom(ctx, pgx.Identifier{"llm_calls"},
-			[]string{"generation_id", "role", "model", "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost_usd", "latency_ms", "finish_reason", "error"},
+			[]string{"generation_id", "role", "model", "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost_usd", "latency_ms", "finish_reason", "error", "output_chars"},
 			pgx.CopyFromRows(rows))
 		if err != nil {
 			return err
@@ -167,7 +167,7 @@ func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit i
 			ids[i], idx[g.ID] = g.ID, i
 		}
 		crows, err := r.pool.Query(ctx,
-			`SELECT generation_id, role, model, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, latency_ms, finish_reason, error
+			`SELECT generation_id, role, model, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, latency_ms, finish_reason, error, output_chars
 			 FROM llm_calls WHERE generation_id = ANY($1) ORDER BY id`, ids)
 		if err != nil {
 			return nil, err
@@ -177,7 +177,7 @@ func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit i
 			var gid int64
 			var c domain.LLMCall
 			if err := crows.Scan(&gid, &c.Role, &c.Model, &c.PromptTokens, &c.CompletionTokens, &c.ReasoningTokens,
-				&c.CostUSD, &c.LatencyMs, &c.FinishReason, &c.Error); err != nil {
+				&c.CostUSD, &c.LatencyMs, &c.FinishReason, &c.Error, &c.OutputChars); err != nil {
 				return nil, err
 			}
 			out[idx[gid]].Calls = append(out[idx[gid]].Calls, c)
@@ -187,6 +187,28 @@ func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit i
 		}
 	}
 	return out, nil
+}
+
+// estimateWindow — сколько последних удачных сборок берётся для оценки: свежие отражают
+// текущие модели и промпты.
+const estimateWindow = 20
+
+func (r *Repository) BuildEstimate(ctx context.Context, kind string) (domain.BuildEstimate, error) {
+	var e domain.BuildEstimate
+	var dur, chars float64
+	err := r.pool.QueryRow(ctx,
+		`WITH g AS (
+		   SELECT id, duration_ms FROM generations
+		   WHERE kind=$1 AND status IN ('ready','ready_with_issues')
+		   ORDER BY id DESC LIMIT $2)
+		 SELECT count(*),
+		        coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), 0),
+		        coalesce((SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY c.output_chars)
+		                  FROM llm_calls c JOIN g ON g.id = c.generation_id
+		                  WHERE c.role='coder' AND c.error='' AND c.output_chars > 0), 0)
+		 FROM g`, kind, estimateWindow).Scan(&e.Samples, &dur, &chars)
+	e.DurationMs, e.CoderChars = int64(dur), int(chars)
+	return e, err
 }
 
 func (r *Repository) LatestScreenshot(ctx context.Context, gameID string) ([]byte, error) {

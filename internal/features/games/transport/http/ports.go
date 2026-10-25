@@ -12,7 +12,7 @@ type Games interface {
 	RevisePlan(ctx context.Context, userID, gameID, feedback string) (domain.Game, domain.Plan, error)
 	ApprovePlan(ctx context.Context, userID, gameID string, spec *domain.GameSpec) (domain.Game, error)
 	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, error)
-	GetStatus(ctx context.Context, userID, gameID string) (domain.Game, error)
+	GetStatus(ctx context.Context, userID, gameID string) (domain.Game, *domain.BuildProgress, error)
 	Subscribe(ctx context.Context, userID, gameID string) (domain.Game, <-chan domain.StatusEvent, func(), error)
 	ListGenerations(ctx context.Context, userID, gameID string) ([]domain.Generation, error)
 	Screenshot(ctx context.Context, userID, gameID string) ([]byte, error)

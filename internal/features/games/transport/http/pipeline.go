@@ -21,13 +21,15 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	g, err := h.svc.GetStatus(r.Context(), userID, gameID)
+	g, progress, err := h.svc.GetStatus(r.Context(), userID, gameID)
 	if err != nil {
 		response.Error(w, r, err)
 		return
 	}
 
-	response.JSON(w, http.StatusOK, statusWithGameDTO{statusDTO: toStatusDTO(gameStatus(g)), Game: h.toGameDTO(g)})
+	st := gameStatus(g)
+	st.Progress = progress
+	response.JSON(w, http.StatusOK, statusWithGameDTO{statusDTO: toStatusDTO(st), Game: h.toGameDTO(g)})
 }
 
 // Events — SSE-поток смен статуса. EventSource не умеет заголовки: токен через ?token=.

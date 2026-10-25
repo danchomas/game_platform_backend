@@ -88,7 +88,7 @@ frontend/          студия, каталог и дашборд (React + Vite,
 ### Генерация (агентный конвейер)
 
 1. `POST /api/games {prompt}` → **план** игры от дешёвой модели (жанр, жесты, размер интерфейса под аудиторию, длина раунда), статус `awaiting_approval`. План правится в чате (`POST /plan`) или присылается отредактированным в `POST /approve {spec}`.
-2. `POST /approve` → сборка в фоне (`202`), статусы `generating → validating → testing → fixing → ready | failed`. Ход — `GET /status` (опрос) или `GET /events` (SSE).
+2. `POST /approve` → сборка в фоне (`202`), статусы `generating → validating → testing → fixing → ready | failed`. Ход — `GET /status` (опрос) или `GET /events` (SSE). Пока идёт сборка, в ответе есть `progress`: код пишется потоком, видно, сколько написано (`chars` из `expected_chars`), до какого этапа дошла модель (`step` — метки `// @step …`, которые кодер ставит в коде), сколько прошло (`elapsed_ms`) и сколько обычно длится такая сборка (`expected_ms`, медиана последних удачных сборок).
 3. Кодер пишет игру по плану. Управление — через **GameKit**: жесты (`tap/swipe/drag/hold/action`), экранные кнопки, звук и масштаб. Библиотека встраивается в HTML игры, игра остаётся одним файлом.
 4. Ответ проходит `htmlguard`, затем проверки агента (вызовы `GameSDK.start/end`, ввод, сеть, `alert`), затем **тест в headless Chrome**: мобильный экран, сеть заблокирована; агент тапает и свайпает, смотрит ошибки JS, старт раунда, цикл кадров и реакцию на ввод.
 5. Найденные проблемы уходят модели-исправителю (до `MAX_FIX_ROUNDS` кругов). Если проблемы остались, версия сохраняется со статусом `ready` и пояснением в `status_detail`.
@@ -137,7 +137,7 @@ https://<host>/g/<UUID>?uid=<идентификатор_пользователя
 | POST | `/api/games` | `{prompt, auto_approve?}` → `{game, plan, reply}` (`201`; с `auto_approve` — `202` и сразу сборка) |
 | POST | `/api/games/{id}/plan` | `{content}` → правка плана до первой сборки |
 | POST | `/api/games/{id}/approve` | `{spec?}` → `202 {game}`, фоновая сборка |
-| GET | `/api/games/{id}/status` | статус конвейера и карточка игры (без html) |
+| GET | `/api/games/{id}/status` | статус конвейера, ход сборки (`progress`) и карточка игры (без html) |
 | GET | `/api/games/{id}/events` | SSE-поток смен статуса (`?token=` для EventSource) |
 | GET | `/api/games/{id}/generations` | история запусков агента: стоимость, проблемы, отчёт теста |
 | GET | `/api/games/{id}/preview.jpg` | скриншот из теста в браузере |

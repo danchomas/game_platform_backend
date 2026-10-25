@@ -236,12 +236,20 @@ func (s *Service) runBuild(ctx context.Context, gameID, kind, instruction string
 		return
 	}
 
+	est := s.estimate(ctx, kind)
+	s.progress.start(gameID, est.DurationMs)
+	defer s.progress.finish(gameID)
+
 	start, tr := time.Now(), &agent.Trace{}
-	in := agent.BuildInput{Prompt: g.Prompt, Spec: specOf(g), Hint: s.hint(ctx)}
+	in := agent.BuildInput{Prompt: g.Prompt, Spec: specOf(g), Hint: s.hint(ctx),
+		Progress: s.progressFn(gameID), ExpectedChars: est.CoderChars}
 	if kind == domain.GenEdit {
 		in.CurrentHTML, in.Instruction, in.History = g.HTML, instruction, s.history(ctx, gameID)
 	}
-	stage := func(status, detail string) { s.setStatus(wctx, gameID, status, detail, 0) }
+	stage := func(status, detail string) {
+		s.progress.stage(gameID, status, detail)
+		s.setStatus(wctx, gameID, status, detail, 0)
+	}
 
 	out, err := s.agent.Build(ctx, in, stage, tr)
 	res := genResult(genID, start, tr)
@@ -329,7 +337,11 @@ func (s *Service) setStatus(ctx context.Context, gameID, status, detail string, 
 }
 
 func (s *Service) publish(gameID, status, detail string, version int) {
-	s.events.publish(domain.StatusEvent{GameID: gameID, Status: status, Detail: detail, Version: version, At: time.Now()})
+	ev := domain.StatusEvent{GameID: gameID, Status: status, Detail: detail, Version: version, At: time.Now()}
+	if domain.Busy(status) {
+		ev.Progress = s.progress.get(gameID)
+	}
+	s.events.publish(ev)
 }
 
 func (s *Service) finishGen(ctx context.Context, res domain.GenerationResult) {
@@ -385,13 +397,17 @@ func (s *Service) Subscribe(ctx context.Context, userID, gameID string) (domain.
 	return g, ch, cancel, nil
 }
 
-func (s *Service) GetStatus(ctx context.Context, userID, gameID string) (domain.Game, error) {
+// GetStatus — игра без HTML и, пока идёт сборка, её ход.
+func (s *Service) GetStatus(ctx context.Context, userID, gameID string) (domain.Game, *domain.BuildProgress, error) {
 	g, err := s.getOwnedGame(ctx, userID, gameID)
 	if err != nil {
-		return domain.Game{}, err
+		return domain.Game{}, nil, err
 	}
 	g.HTML = ""
-	return g, nil
+	if !domain.Busy(g.Status) {
+		return g, nil, nil
+	}
+	return g, s.progress.get(gameID), nil
 }
 
 func (s *Service) ListGenerations(ctx context.Context, userID, gameID string) ([]domain.Generation, error) {

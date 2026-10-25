@@ -98,15 +98,20 @@ type Stage func(status, detail string)
 
 // call вызывает модель. Если «думающая» модель израсходовала лимит на рассуждения и не
 // ответила, вызов повторяется один раз с выключенными рассуждениями.
-func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, tr *Trace) (string, error) {
-	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, a.cfg.Reasoning, tr)
+// w != nil — ответ идёт потоком, и его ход сообщается наружу.
+func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, w watcher, tr *Trace) (string, error) {
+	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, a.cfg.Reasoning, w, tr)
 	if errors.Is(err, llm.ErrEmptyTruncated) && a.cfg.Reasoning != llm.ReasoningOff {
-		return a.callOnce(ctx, role, model, msgs, temp, maxCont, llm.ReasoningOff, tr)
+		return a.callOnce(ctx, role, model, msgs, temp, maxCont, llm.ReasoningOff, w, tr)
 	}
 	return text, err
 }
 
-func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, tr *Trace) (string, error) {
+func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, w watcher, tr *Trace) (string, error) {
+	var onDelta func(string)
+	if w != nil {
+		onDelta = w()
+	}
 	// LLM_TIMEOUT_SEC — на каждый запрос: продолжение длинного ответа получает свой таймаут
 	resp, err := llm.CompleteFull(ctx, llm.WithCallTimeout(a.llm, a.cfg.CallTimeout), llm.Request{
 		Model:       model,
@@ -115,6 +120,7 @@ func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg
 		MaxTokens:   a.cfg.Models.MaxTokens,
 		Temperature: temp,
 		Reasoning:   reasoning,
+		OnDelta:     onDelta,
 	}, maxCont)
 
 	c := domain.LLMCall{
@@ -126,6 +132,7 @@ func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg
 		CostUSD:          resp.Usage.CostUSD,
 		LatencyMs:        resp.Latency.Milliseconds(),
 		FinishReason:     resp.FinishReason,
+		OutputChars:      len(resp.Text),
 	}
 	if resp.Model != "" {
 		c.Model = resp.Model
@@ -153,7 +160,7 @@ func (a *Agent) Plan(ctx context.Context, in PlanInput, tr *Trace) (domain.GameS
 	var spec domain.GameSpec
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		raw, err := a.call(ctx, "planner", a.cfg.Models.Planner, msgs, 0.4, 0, tr)
+		raw, err := a.call(ctx, "planner", a.cfg.Models.Planner, msgs, 0.4, 0, nil, tr)
 		if err != nil {
 			return spec, err
 		}
@@ -192,6 +199,11 @@ type BuildInput struct {
 	Instruction string
 	History     []llm.Msg
 	Hint        llm.HintInput
+	// Progress != nil — код пишется потоком, ход сообщается сюда
+	Progress Progress
+	// ExpectedChars — обычный размер новой игры по истории; 0 — значение по умолчанию.
+	// При правке ожидаемый размер — размер текущего кода.
+	ExpectedChars int
 }
 
 type BuildOutput struct {
@@ -211,12 +223,18 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 
 	stage(domain.StatusGenerating, "")
 	var msgs []llm.Msg
+	expected := in.ExpectedChars
+	if expected <= 0 {
+		expected = defaultExpectedChars
+	}
 	if in.CurrentHTML == "" {
 		msgs = llm.BuildMessages(in.Hint, *in.Spec, in.Prompt)
 	} else {
-		msgs = llm.EditMessages(in.Hint, in.History, in.Spec, gamekit.Strip(in.CurrentHTML), in.Instruction)
+		current := gamekit.Strip(in.CurrentHTML)
+		msgs = llm.EditMessages(in.Hint, in.History, in.Spec, current, in.Instruction)
+		expected = len(current) // правка возвращает файл целиком
 	}
-	res, err := a.code(ctx, "coder", a.cfg.Models.Coder, msgs, 0.7, tr)
+	res, err := a.code(ctx, "coder", a.cfg.Models.Coder, msgs, 0.7, in.Progress.watch("coder", expected), tr)
 	if err != nil {
 		return BuildOutput{}, err
 	}
@@ -256,7 +274,8 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		blocking := errorsOnly(issues)
 		stage(domain.StatusFixing, fmt.Sprintf("круг %d: %s", round+1, issueCodes(blocking)))
 		tr.FixRounds++
-		fixed, ferr := a.code(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, blocking), 0.2, tr)
+		fixed, ferr := a.code(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, blocking), 0.2,
+			in.Progress.watch("fixer", len(html)), tr)
 		if ferr != nil {
 			if ctx.Err() != nil {
 				return BuildOutput{}, ctx.Err()
@@ -289,10 +308,10 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 
 // code — вызов модели, которая должна вернуть игру. Ответ проходит llm.Parse и htmlguard;
 // непригодный ответ получает ещё одну попытку, сетевая ошибка — нет.
-func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, tr *Trace) (llm.Result, error) {
+func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, w watcher, tr *Trace) (llm.Result, error) {
 	var lastErr error
 	for attempt := range 2 {
-		raw, err := a.call(ctx, role, model, msgs, temp, 2, tr)
+		raw, err := a.call(ctx, role, model, msgs, temp, 2, w, tr)
 		if err != nil {
 			return llm.Result{}, err
 		}

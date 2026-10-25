@@ -41,6 +41,8 @@ type PipelineRepository interface {
 	ListGenerations(ctx context.Context, gameID string, limit int) ([]domain.Generation, error)
 	LatestScreenshot(ctx context.Context, gameID string) ([]byte, error)
 	GenerationStats(ctx context.Context, from time.Time) (domain.GenerationStats, error)
+	// BuildEstimate — медианы по последним удачным сборкам вида kind (build/edit).
+	BuildEstimate(ctx context.Context, kind string) (domain.BuildEstimate, error)
 }
 
 // Agent — агентный конвейер из internal/core/agent: план, сборка, проверки, исправления.

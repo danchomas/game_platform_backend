@@ -266,6 +266,10 @@ func (f *fakeRepo) GenerationStats(context.Context, time.Time) (domain.Generatio
 	return domain.GenerationStats{}, nil
 }
 
+func (f *fakeRepo) BuildEstimate(context.Context, string) (domain.BuildEstimate, error) {
+	return domain.BuildEstimate{Samples: 5, DurationMs: 90_000, CoderChars: 20_000}, nil
+}
+
 // fakeAgent — сценарий агента без LLM: план и сборка из заданных значений.
 type fakeAgent struct {
 	mu sync.Mutex
@@ -302,6 +306,9 @@ func (a *fakeAgent) Build(ctx context.Context, in agent.BuildInput, stage agent.
 	a.mu.Unlock()
 
 	stage(domain.StatusGenerating, "")
+	if in.Progress != nil {
+		in.Progress("coder", 1200, in.ExpectedChars, "Рисуем поле")
+	}
 	if entered != nil {
 		entered <- struct{}{}
 	}
