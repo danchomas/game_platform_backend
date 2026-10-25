@@ -42,13 +42,12 @@ services:
       DATABASE_URL: postgres://beeline:${POSTGRES_PASSWORD:-beeline}@db:5432/beeline?sslmode=disable
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?задайте OPENROUTER_API_KEY в .env}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-4.5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       MANAGER_CODE: ${MANAGER_CODE:-}
       MAX_CONCURRENT_GEN: ${MAX_CONCURRENT_GEN:-8}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-180}
-      OPENROUTER_URL: ${OPENROUTER_URL:-}
-      PROXY_URL: ${PROXY_URL:-}
 
 volumes:
   pgdata:

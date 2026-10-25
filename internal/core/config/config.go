@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"beeline-games/internal/core/llm"
 )
 
 const (
@@ -21,10 +23,9 @@ type Config struct {
 	DatabaseURL string
 	JWTSecret   string
 
-	OpenRouterURL   string
-	OpenRouterKey   string
-	OpenRouterModel string
-	ProxyURL        string
+	OpenRouterBaseURL string
+	OpenRouterKey     string
+	OpenRouterModel   string
 
 	PublicBaseURL    string
 	ManagerCode      string
@@ -38,10 +39,9 @@ func Load() (Config, error) {
 		DatabaseURL: env("DATABASE_URL", ""),
 		JWTSecret:   env("JWT_SECRET", ""),
 
-		OpenRouterURL:   env("OPENROUTER_URL", ""),
-		OpenRouterKey:   env("OPENROUTER_API_KEY", ""),
-		OpenRouterModel: env("OPENROUTER_MODEL", defaultModel),
-		ProxyURL:        env("PROXY_URL", ""),
+		OpenRouterBaseURL: env("OPENROUTER_BASE_URL", llm.DefaultBaseURL),
+		OpenRouterKey:     env("OPENROUTER_API_KEY", ""),
+		OpenRouterModel:   env("OPENROUTER_MODEL", defaultModel),
 
 		PublicBaseURL:    strings.TrimRight(env("PUBLIC_BASE_URL", defaultPublicBaseURL), "/"),
 		ManagerCode:      env("MANAGER_CODE", ""),
