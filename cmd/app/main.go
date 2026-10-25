@@ -73,9 +73,13 @@ func run() error {
 		eventCollector.Run(ctx)
 	}()
 
-	model := llm.NewClient(cfg.OpenRouterKey, cfg.OpenRouterModel, cfg.OpenRouterURL, cfg.ProxyURL,
+	model := llm.NewClient(cfg.OpenRouterKey, cfg.OpenRouterModel, cfg.OpenRouterBaseURL,
 		cfg.LLMTimeout+llmClientSlack)
 
+	slog.Info("модель настроена",
+		"base_url", model.BaseURL(),
+		"model", model.Model(),
+		"key_set", cfg.LLMConfigured())
 	if !cfg.LLMConfigured() {
 		slog.Warn("OPENROUTER_API_KEY не задан: генерация игр будет отвечать «модель недоступна»")
 	}
