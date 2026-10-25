@@ -57,12 +57,12 @@ func TestValidateGoodGame(t *testing.T) {
 }
 
 func TestValidateCatchesProblems(t *testing.T) {
-	bad := `<html><head><script src="https://cdn.example.com/x.js"></script></head><body><script>alert('hi')</script></body></html>`
+	bad := `<html><head><style>@import "x.css";</style></head><body><script>fetch('/x'); alert('hi')</script></body></html>`
 	codes := map[string]bool{}
 	for _, i := range Validate(bad, nil) {
 		codes[i.Code] = true
 	}
-	for _, c := range []string{"external_resource", "blocking_dialog", "no_sdk_start", "no_sdk_end", "no_input"} {
+	for _, c := range []string{"external_resource", "network_call", "blocking_dialog", "no_sdk_start", "no_sdk_end", "no_input"} {
 		if !codes[c] {
 			t.Errorf("missing %s in %v", c, codes)
 		}

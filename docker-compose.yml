@@ -28,6 +28,7 @@ services:
       - up
     restart: "no"
 
+  # headless Chrome: агент запускает в нём сгенерированные игры и проверяет, что они работают
   browser:
     image: chromedp/headless-shell:latest
     restart: unless-stopped
@@ -50,23 +51,27 @@ services:
     environment:
       DATABASE_URL: postgres://beeline:${POSTGRES_PASSWORD:-beeline}@db:5432/beeline?sslmode=disable
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?задайте OPENROUTER_API_KEY в .env}
-      OPENROUTER_URL: ${OPENROUTER_URL:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-haiku-5.5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
       LLM_PLANNER_MODEL: ${LLM_PLANNER_MODEL:-deepseek/deepseek-v4.1-flash}
-      LLM_CODER_MODEL: ${LLM_CODER_MODEL:-anthropic/claude-haiku-5.5}
       LLM_FIXER_MODEL: ${LLM_FIXER_MODEL:-}
       LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-deepseek/deepseek-v4-pro}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-32000}
-      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-240}
       MAX_FIX_ROUNDS: ${MAX_FIX_ROUNDS:-2}
       BROWSER_WS_URL: ${BROWSER_WS_URL:-ws://browser:9222}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       MANAGER_CODE: ${MANAGER_CODE:-}
       MAX_CONCURRENT_GEN: ${MAX_CONCURRENT_GEN:-8}
-      WEB_DIR: /app/web
-      PROXY_URL: ${PROXY_URL:-}
-    volumes:
-      - ./web:/app/web:ro
+      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-240}
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
 
 volumes:
   pgdata:

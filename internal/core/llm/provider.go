@@ -2,24 +2,18 @@ package llm
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
 
-// Provider — единственная точка входа к любой LLM. OpenRouter — одна из реализаций;
-// шлюз Билайна подключается новой реализацией без изменений агента и сервисов.
+// Provider — единственная точка входа к модели для агента. Client (OpenRouter и любой
+// OpenAI-совместимый шлюз) — одна из реализаций; шлюз Билайна подключается так же.
 type Provider interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
 
-type Msg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 type Request struct {
+	// Model пусто — модель клиента по умолчанию.
 	Model       string
 	Fallbacks   []string
 	Messages    []Msg
@@ -28,9 +22,9 @@ type Request struct {
 }
 
 type Usage struct {
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CostUSD          float64 `json:"cost_usd"`
+	PromptTokens     int
+	CompletionTokens int
+	CostUSD          float64
 }
 
 func (u *Usage) Add(o Usage) {
@@ -52,23 +46,10 @@ func (r Response) Truncated() bool {
 	return r.FinishReason == "length" || r.FinishReason == "max_tokens"
 }
 
-var ErrNoKey = errors.New("ключ LLM-провайдера не задан")
-
-type HTTPError struct {
-	Status int
-	Msg    string
-}
-
-func (e *HTTPError) Error() string { return fmt.Sprintf("llm: HTTP %d: %s", e.Status, e.Msg) }
-
-func (e *HTTPError) Retryable() bool {
-	return e.Status == 408 || e.Status == 429 || e.Status >= 500
-}
-
 const continuePrompt = "Your previous answer was cut off by the output limit. Continue EXACTLY from the last character you wrote. Output only the continuation: no repetition, no explanations, do not reopen tags that are already open."
 
-// CompleteFull склеивает ответ, если модель оборвалась по лимиту токенов:
-// просит продолжить с места обрыва (до maxCont раз). Usage и Latency суммируются.
+// CompleteFull склеивает ответ, оборванный по лимиту токенов: просит модель продолжить
+// с места обрыва (до maxCont раз). Usage и Latency суммируются.
 func CompleteFull(ctx context.Context, p Provider, req Request, maxCont int) (Response, error) {
 	resp, err := p.Complete(ctx, req)
 	if err != nil {

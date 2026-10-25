@@ -4,6 +4,7 @@ import "strings"
 
 // GameSpec — план игры, который агент составляет до написания кода
 // и который пользователь может поправить перед подтверждением.
+// json-теги здесь — формат обмена с моделью и хранения в JSONB, а не транспорт.
 type GameSpec struct {
 	Title         string     `json:"title"`
 	Genre         string     `json:"genre"`

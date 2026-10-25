@@ -4,32 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
 
 	"github.com/jackc/pgx/v5"
 )
 
-func (r *repository) SetStatus(ctx context.Context, id, status, detail string) error {
+func (r *Repository) SetStatus(ctx context.Context, id, status, detail string) error {
 	_, err := r.pool.Exec(ctx,
 		`UPDATE games SET status=$2, status_detail=$3, updated_at=now() WHERE id=$1`, id, status, detail)
-	return err
+	if err != nil {
+		return fmt.Errorf("смена статуса генерации: %w", err)
+	}
+	return nil
 }
 
 // TrySetStatus атомарно переводит игру в новый статус, только если текущий входит в from.
-func (r *repository) TrySetStatus(ctx context.Context, id, status string, from []string) (bool, error) {
+func (r *Repository) TrySetStatus(ctx context.Context, id, status string, from []string) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE games SET status=$2, status_detail='', updated_at=now() WHERE id=$1 AND status = ANY($3)`,
 		id, status, from)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("смена статуса генерации: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-func (r *repository) SetSpec(ctx context.Context, id string, spec domain.GameSpec) error {
+func (r *Repository) SetSpec(ctx context.Context, id string, spec domain.GameSpec) error {
 	b, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -44,14 +48,14 @@ func (r *repository) SetSpec(ctx context.Context, id string, spec domain.GameSpe
 	return err
 }
 
-func (r *repository) AddMessage(ctx context.Context, gameID, role, content string) error {
+func (r *Repository) AddMessage(ctx context.Context, gameID, role, content string) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO messages(game_id,role,content) VALUES($1,$2,$3)`, gameID, role, content)
 	return err
 }
 
 // ResetInterrupted помечает игры, чья генерация оборвалась перезапуском сервера.
-func (r *repository) ResetInterrupted(ctx context.Context) (int64, error) {
+func (r *Repository) ResetInterrupted(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE games SET
 		   status = CASE WHEN status='planning' AND spec IS NOT NULL THEN 'awaiting_approval'
@@ -66,14 +70,14 @@ func (r *repository) ResetInterrupted(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), err
 }
 
-func (r *repository) StartGeneration(ctx context.Context, gameID, kind string) (int64, error) {
+func (r *Repository) StartGeneration(ctx context.Context, gameID, kind string) (int64, error) {
 	var id int64
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO generations(game_id,kind) VALUES($1,$2) RETURNING id`, gameID, kind).Scan(&id)
 	return id, err
 }
 
-func (r *repository) FinishGeneration(ctx context.Context, g domain.GenerationResult) error {
+func (r *Repository) FinishGeneration(ctx context.Context, g domain.GenerationResult) error {
 	issues, err := json.Marshal(g.Issues)
 	if err != nil {
 		return err
@@ -82,8 +86,8 @@ func (r *repository) FinishGeneration(ctx context.Context, g domain.GenerationRe
 		issues = []byte("[]")
 	}
 	var test any
-	if len(g.Test) > 0 {
-		test = string(g.Test)
+	if len(g.TestReport) > 0 {
+		test = string(g.TestReport)
 	}
 	var pt, ct int
 	var cost float64
@@ -122,7 +126,7 @@ func (r *repository) FinishGeneration(ctx context.Context, g domain.GenerationRe
 	return tx.Commit(ctx)
 }
 
-func (r *repository) ListGenerations(ctx context.Context, gameID string, limit int) ([]domain.Generation, error) {
+func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit int) ([]domain.Generation, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, game_id, kind, status, version, prompt_tokens, completion_tokens, cost_usd, duration_ms,
 		        fix_rounds, issues::text, coalesce(test_report::text,''), error, screenshot IS NOT NULL, created_at, finished_at
@@ -148,7 +152,7 @@ func (r *repository) ListGenerations(ctx context.Context, gameID string, limit i
 		}
 		_ = json.Unmarshal([]byte(issues), &g.Issues)
 		if test != "" {
-			g.Test = json.RawMessage(test)
+			g.TestReport = []byte(test)
 		}
 		out = append(out, g)
 	}
@@ -185,18 +189,18 @@ func (r *repository) ListGenerations(ctx context.Context, gameID string, limit i
 	return out, nil
 }
 
-func (r *repository) LatestScreenshot(ctx context.Context, gameID string) ([]byte, error) {
+func (r *Repository) LatestScreenshot(ctx context.Context, gameID string) ([]byte, error) {
 	var b []byte
 	err := r.pool.QueryRow(ctx,
 		`SELECT screenshot FROM generations WHERE game_id=$1 AND screenshot IS NOT NULL ORDER BY id DESC LIMIT 1`,
 		gameID).Scan(&b)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, coreErrs.ErrNotFound
+		return nil, apperr.ErrNotFound
 	}
 	return b, err
 }
 
-func (r *repository) GenerationStats(ctx context.Context, from time.Time) (domain.GenerationStats, error) {
+func (r *Repository) GenerationStats(ctx context.Context, from time.Time) (domain.GenerationStats, error) {
 	var s domain.GenerationStats
 	err := r.pool.QueryRow(ctx,
 		`SELECT count(*) FILTER (WHERE kind IN ('build','edit')),

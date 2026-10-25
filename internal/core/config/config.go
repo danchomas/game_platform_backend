@@ -1,76 +1,131 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"beeline-games/internal/core/llm"
+)
+
+const (
+	defaultAddr             = ":8080"
+	defaultModel            = "anthropic/claude-haiku-5.5"
+	defaultPlannerModel     = "deepseek/deepseek-v4.1-flash"
+	defaultPublicBaseURL    = "http://localhost:8080"
+	defaultMaxConcurrentGen = 8
+	defaultLLMTimeoutSec    = 240
+	defaultLLMMaxTokens     = 32000
+	defaultMaxFixRounds     = 2
+
+	defaultBrowserTimeoutSec  = 40
+	defaultBrowserMaxParallel = 2
 )
 
 type Config struct {
-	Addr			string
-	DatabaseURL		string
-	JWTSecret		string
-	OpenRouterKey		string
-	OpenRouterModel		string
-	OpenRouterURL		string
-	PublicBaseURL		string
-	WebDir			string
-	ManagerCode		string
-	MaxConcurrentGen	int
-	LLMTimeout		time.Duration
-	ProxyURL		string
+	Addr        string
+	DatabaseURL string
+	JWTSecret   string
 
-	PlannerModel	string
-	CoderModel	string
-	FixerModel	string
-	FallbackModels	[]string
-	LLMMaxTokens	int
-	MaxFixRounds	int
+	OpenRouterBaseURL string
+	OpenRouterKey     string
+	// OpenRouterModel — модель-кодер (пишет и правит игру).
+	OpenRouterModel string
 
-	BrowserWSURL		string
-	BrowserTimeout		time.Duration
-	BrowserMaxParallel	int
+	// Модели по ролям агента: планировщик дешевле кодера; исправитель по умолчанию = кодер.
+	PlannerModel   string
+	FixerModel     string
+	FallbackModels []string
+	LLMMaxTokens   int
+	MaxFixRounds   int
+
+	// BrowserWSURL — DevTools headless Chrome для теста игр; пусто — только статическая проверка.
+	BrowserWSURL       string
+	BrowserTimeout     time.Duration
+	BrowserMaxParallel int
+
+	PublicBaseURL    string
+	ManagerCode      string
+	MaxConcurrentGen int
+	LLMTimeout       time.Duration
 }
 
-func Load() Config {
-	coder := env("LLM_CODER_MODEL", env("OPENROUTER_MODEL", "anthropic/claude-haiku-5.5"))
-	return Config{
-		Addr:			env("ADDR", ":8080"),
-		DatabaseURL:		env("DATABASE_URL", ""),
-		JWTSecret:		env("JWT_SECRET", ""),
-		OpenRouterKey:		env("OPENROUTER_API_KEY", ""),
-		OpenRouterModel:	coder,
-		OpenRouterURL:		env("OPENROUTER_URL", ""),
-		PublicBaseURL:		env("PUBLIC_BASE_URL", ""),
-		WebDir:			env("WEB_DIR", "./web"),
-		ManagerCode:		env("MANAGER_CODE", ""),
-		MaxConcurrentGen:	envInt("MAX_CONCURRENT_GEN", 8),
-		LLMTimeout:		time.Duration(envInt("LLM_TIMEOUT_SEC", 240)) * time.Second,
-		ProxyURL:		env("PROXY_URL", ""),
+func Load() (Config, error) {
+	cfg := Config{
+		Addr:        env("ADDR", defaultAddr),
+		DatabaseURL: env("DATABASE_URL", ""),
+		JWTSecret:   env("JWT_SECRET", ""),
 
-		PlannerModel:	env("LLM_PLANNER_MODEL", "deepseek/deepseek-v4.1-flash"),
-		CoderModel:	coder,
-		FixerModel:	env("LLM_FIXER_MODEL", coder),
-		FallbackModels:	envList("LLM_FALLBACK_MODELS"),
-		LLMMaxTokens:	envInt("LLM_MAX_TOKENS", 32000),
-		MaxFixRounds:	envInt("MAX_FIX_ROUNDS", 2),
+		OpenRouterBaseURL: env("OPENROUTER_BASE_URL", llm.DefaultBaseURL),
+		OpenRouterKey:     env("OPENROUTER_API_KEY", ""),
+		OpenRouterModel:   env("OPENROUTER_MODEL", defaultModel),
 
-		BrowserWSURL:		env("BROWSER_WS_URL", ""),
-		BrowserTimeout:		time.Duration(envInt("BROWSER_TEST_TIMEOUT_SEC", 40)) * time.Second,
-		BrowserMaxParallel:	envInt("BROWSER_MAX_PARALLEL", 2),
+		PlannerModel:   env("LLM_PLANNER_MODEL", defaultPlannerModel),
+		FallbackModels: envList("LLM_FALLBACK_MODELS"),
+		LLMMaxTokens:   envInt("LLM_MAX_TOKENS", defaultLLMMaxTokens),
+		MaxFixRounds:   envInt("MAX_FIX_ROUNDS", defaultMaxFixRounds),
+
+		BrowserWSURL:       env("BROWSER_WS_URL", ""),
+		BrowserTimeout:     time.Duration(envInt("BROWSER_TEST_TIMEOUT_SEC", defaultBrowserTimeoutSec)) * time.Second,
+		BrowserMaxParallel: envInt("BROWSER_MAX_PARALLEL", defaultBrowserMaxParallel),
+
+		PublicBaseURL:    strings.TrimRight(env("PUBLIC_BASE_URL", defaultPublicBaseURL), "/"),
+		ManagerCode:      env("MANAGER_CODE", ""),
+		MaxConcurrentGen: envInt("MAX_CONCURRENT_GEN", defaultMaxConcurrentGen),
+		LLMTimeout:       time.Duration(envInt("LLM_TIMEOUT_SEC", defaultLLMTimeoutSec)) * time.Second,
 	}
+
+	cfg.FixerModel = env("LLM_FIXER_MODEL", cfg.OpenRouterModel)
+
+	return cfg, cfg.Validate()
 }
 
-func env(k, def string) string {
-	if v := os.Getenv(k); v != "" {
+func (c Config) Validate() error {
+	var missing []string
+
+	if c.DatabaseURL == "" {
+		missing = append(missing, "DATABASE_URL")
+	}
+	if c.JWTSecret == "" {
+		missing = append(missing, "JWT_SECRET")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("не заданы обязательные переменные окружения: %s", strings.Join(missing, ", "))
+	}
+
+	if c.MaxConcurrentGen < 1 {
+		return fmt.Errorf("MAX_CONCURRENT_GEN должен быть положительным, получено %d", c.MaxConcurrentGen)
+	}
+	if c.LLMTimeout <= 0 {
+		return fmt.Errorf("LLM_TIMEOUT_SEC должен быть положительным, получено %s", c.LLMTimeout)
+	}
+	if c.LLMMaxTokens < 1 {
+		return fmt.Errorf("LLM_MAX_TOKENS должен быть положительным, получено %d", c.LLMMaxTokens)
+	}
+	if c.MaxFixRounds < 0 {
+		return fmt.Errorf("MAX_FIX_ROUNDS не может быть отрицательным, получено %d", c.MaxFixRounds)
+	}
+	if c.BrowserTimeout <= 0 || c.BrowserMaxParallel < 1 {
+		return fmt.Errorf("BROWSER_TEST_TIMEOUT_SEC и BROWSER_MAX_PARALLEL должны быть положительными")
+	}
+
+	return nil
+}
+
+func (c Config) LLMConfigured() bool { return c.OpenRouterKey != "" }
+
+func env(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
 	return def
 }
 
-func envInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
+func envInt(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
@@ -78,11 +133,11 @@ func envInt(k string, def int) int {
 	return def
 }
 
-func envList(k string) []string {
+func envList(key string) []string {
 	var out []string
-	for _, p := range strings.Split(os.Getenv(k), ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
+	for _, part := range strings.Split(os.Getenv(key), ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
 		}
 	}
 	return out

@@ -4,12 +4,12 @@ package domain
 // и на что целиться планировщику. Source = "assumption" — наше допущение,
 // его нужно перепроверить на реальных данных платформы.
 type Benchmark struct {
-	Metric string  `json:"metric"`
-	Unit   string  `json:"unit"`
-	Median float64 `json:"median"`
-	Good   float64 `json:"good"`
-	Source string  `json:"source"`
-	Note   string  `json:"note,omitempty"`
+	Metric string
+	Unit   string
+	Median float64
+	Good   float64
+	Source string
+	Note   string
 }
 
 var Benchmarks = []Benchmark{

@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	externalRe = regexp.MustCompile(`(?i)(?:\b(?:src|href)\s*=\s*["']\s*(?:https?:)?//|@import\s|url\(\s*["']?\s*(?:https?:)?//)`)
+	importRe   = regexp.MustCompile(`(?i)@import\s`)
 	networkRe  = regexp.MustCompile(`\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\s*\(|\bimport\s*\(|<script[^>]*\btype\s*=\s*["']module`)
 	dialogRe   = regexp.MustCompile(`(?:^|[^.\w$])(?:window\.)?(?:alert|confirm|prompt)\s*\(`)
 	ownInputRe = regexp.MustCompile(`addEventListener\(\s*["'](?:touchstart|touchend|pointerdown|pointerup|mousedown|click)["']`)
@@ -20,18 +20,17 @@ var (
 	gkDefRe    = regexp.MustCompile(`window\.GameKit\s*=|var\s+GameKit\s*=|const\s+GameKit\s*=|let\s+GameKit\s*=`)
 )
 
-const maxHTMLBytes = 2 << 20
-
-// Validate — быстрые статические проверки кода игры (без запуска).
-// html — код без встроенного GameKit.
+// Validate — статические проверки поверх htmlguard: то, без чего игра формально
+// валидна, но не работает на платформе (SDK, ввод, диалоги, сеть). html — без GameKit.
 func Validate(html string, spec *domain.GameSpec) []domain.Issue {
 	var out []domain.Issue
 	add := func(code string, sev domain.Severity, msg string) {
 		out = append(out, domain.Issue{Code: code, Severity: sev, Message: msg})
 	}
 
-	if m := externalRe.FindString(html); m != "" {
-		add("external_resource", domain.SevError, fmt.Sprintf("external resource reference %q: the game must be fully self-contained", strings.TrimSpace(m)))
+	// src/href/url(//…) уже отсекает htmlguard до этой проверки
+	if importRe.MatchString(html) {
+		add("external_resource", domain.SevError, "CSS @import is not allowed: the game must be fully self-contained")
 	}
 	if m := networkRe.FindString(html); m != "" {
 		add("network_call", domain.SevError, fmt.Sprintf("network/module usage %q is not allowed", strings.TrimSpace(m)))
@@ -57,9 +56,6 @@ func Validate(html string, spec *domain.GameSpec) []domain.Issue {
 	}
 	if !canvasRe.MatchString(html) {
 		add("no_canvas", domain.SevWarn, "no <canvas> found: the game should render with HTML5 Canvas/WebGL via GameKit.setup()")
-	}
-	if len(html) > maxHTMLBytes {
-		add("too_large", domain.SevWarn, fmt.Sprintf("file is %d KB; keep it under %d KB", len(html)>>10, maxHTMLBytes>>10))
 	}
 	if spec != nil {
 		if spec.Controls.Scheme == "buttons" && !strings.Contains(html, "GameKit.buttons") {

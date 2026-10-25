@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,33 +20,71 @@ import (
 
 	authRepo "beeline-games/internal/features/auth/repository/postgres"
 	authSvc "beeline-games/internal/features/auth/service"
-	authHttp "beeline-games/internal/features/auth/transport/http"
+	authHTTP "beeline-games/internal/features/auth/transport/http"
 
 	gamesRepo "beeline-games/internal/features/games/repository/postgres"
 	gamesSvc "beeline-games/internal/features/games/service"
-	gamesHttp "beeline-games/internal/features/games/transport/http"
+	gamesHTTP "beeline-games/internal/features/games/transport/http"
 
 	analyticsRepo "beeline-games/internal/features/analytics/repository/postgres"
 	analyticsSvc "beeline-games/internal/features/analytics/service"
-	analyticsHttp "beeline-games/internal/features/analytics/transport/http"
+	analyticsHTTP "beeline-games/internal/features/analytics/transport/http"
 
 	playSvc "beeline-games/internal/features/play/service"
-	playHttp "beeline-games/internal/features/play/transport/http"
+	playHTTP "beeline-games/internal/features/play/transport/http"
+)
+
+const eventBuffer = 100_000
+
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeoutSlack = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+	shutdownTimeout   = 15 * time.Second
+
+	llmClientSlack = 10 * time.Second
 )
 
 func main() {
-	cfg := config.Load()
+	if err := run(); err != nil {
+		slog.Error("сервер остановлен с ошибкой", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := pgx.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("failed to connect to database", "err", err)
-		os.Exit(1)
+		return err
 	}
 	defer pool.Close()
 
-	llmClient := llm.NewOpenRouter(cfg.OpenRouterKey, cfg.OpenRouterURL, cfg.ProxyURL, cfg.LLMTimeout+10*time.Second)
+	eventCollector := collector.New(pool, eventBuffer)
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		eventCollector.Run(ctx)
+	}()
+
+	model := llm.NewClient(cfg.OpenRouterKey, cfg.OpenRouterModel, cfg.OpenRouterBaseURL,
+		cfg.LLMTimeout+llmClientSlack)
+
+	slog.Info("модель настроена",
+		"base_url", model.BaseURL(),
+		"model", model.Model(),
+		"key_set", cfg.LLMConfigured())
+	if !cfg.LLMConfigured() {
+		slog.Warn("OPENROUTER_API_KEY не задан: генерация игр будет отвечать «модель недоступна»")
+	}
 
 	var tester agent.Tester
 	if cfg.BrowserWSURL != "" {
@@ -53,10 +92,10 @@ func main() {
 	} else {
 		slog.Warn("BROWSER_WS_URL не задан: игры проверяются только статически, без запуска в браузере")
 	}
-	gameAgent := agent.New(llmClient, tester, agent.Config{
+	gameAgent := agent.New(model, tester, agent.Config{
 		Models: agent.Models{
 			Planner:   cfg.PlannerModel,
-			Coder:     cfg.CoderModel,
+			Coder:     cfg.OpenRouterModel,
 			Fixer:     cfg.FixerModel,
 			Fallbacks: cfg.FallbackModels,
 			MaxTokens: cfg.LLMMaxTokens,
@@ -64,75 +103,84 @@ func main() {
 		MaxFixRounds: cfg.MaxFixRounds,
 		CallTimeout:  cfg.LLMTimeout,
 	})
+	slog.Info("агент настроен",
+		"planner", cfg.PlannerModel, "coder", cfg.OpenRouterModel, "fixer", cfg.FixerModel,
+		"fix_rounds", cfg.MaxFixRounds, "browser_test", tester != nil)
 
-	eventCollector := collector.New(pool, 100_000)
-	colDone := make(chan struct{})
-	go func() {
-		eventCollector.Run(ctx)
-		close(colDone)
-	}()
+	users := authRepo.NewRepository(pool)
+	games := gamesRepo.NewRepository(pool)
+	stats := analyticsRepo.NewRepository(pool)
 
-	aRepo := authRepo.NewRepository(pool)
-	gRepo := gamesRepo.NewRepository(pool)
-	anRepo := analyticsRepo.NewRepository(pool)
-
-	aSvc := authSvc.NewService(aRepo, cfg.JWTSecret, cfg.ManagerCode)
-	anSvc := analyticsSvc.NewService(anRepo)
-	gSvc := gamesSvc.NewService(ctx, gRepo, gameAgent, anSvc, cfg.MaxConcurrentGen)
-	if err := gSvc.RecoverInterrupted(ctx); err != nil {
-		slog.Error("recover interrupted generations", "err", err)
+	auth := authSvc.NewService(users, cfg.JWTSecret, cfg.ManagerCode)
+	gameCatalog := gamesSvc.NewService(ctx, games, gameAgent, nil, cfg.MaxConcurrentGen)
+	if err := gameCatalog.RecoverInterrupted(ctx); err != nil {
+		slog.Error("прерванные генерации не сброшены", "err", err)
 	}
-	pSvc := playSvc.NewService(gSvc, eventCollector, cfg.PublicBaseURL)
+	analytics := analyticsSvc.NewService(stats, gameCatalog)
+	play := playSvc.NewService(gameCatalog, eventCollector, cfg.PublicBaseURL)
 
-	mux := http.ServeMux{}
+	gameCatalog.SetInsights(analytics)
+
+	mux := http.NewServeMux()
 	authMW := middleware.Auth(cfg.JWTSecret)
+	optionalAuthMW := middleware.OptionalAuth(cfg.JWTSecret)
 
-	authHandler := authHttp.NewHandler(aSvc)
-	authHandler.RegisterRoutes(&mux, authMW)
+	authHTTP.NewHandler(auth).RegisterRoutes(mux, authMW)
+	gamesHTTP.NewHandler(gameCatalog, cfg.PublicBaseURL).RegisterRoutes(mux, authMW, optionalAuthMW)
+	analyticsHTTP.NewHandler(analytics).RegisterRoutes(mux, authMW)
+	playHTTP.NewHandler(play).RegisterRoutes(mux, authMW, optionalAuthMW)
 
-	gamesHandler := gamesHttp.NewHandler(gSvc, cfg.PublicBaseURL)
-	gamesHandler.RegisterRoutes(&mux, authMW)
-
-	analyticsHandler := analyticsHttp.NewHandler(anSvc, gSvc)
-	analyticsHandler.RegisterRoutes(&mux, authMW)
-
-	playHandler := playHttp.NewHandler(pSvc)
-	playHandler.RegisterRoutes(&mux, authMW)
-
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			http.Error(w, "db down", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
-	})
+	mux.HandleFunc("GET /healthz", healthz(pool))
 
 	srv := &http.Server{
-		Addr:			cfg.Addr,
-		Handler:		&mux,
-		ReadHeaderTimeout:	10 * time.Second,
-		ReadTimeout:		30 * time.Second,
-		WriteTimeout:		cfg.LLMTimeout + 30*time.Second,
-		IdleTimeout:		120 * time.Second,
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      cfg.LLMTimeout + writeTimeoutSlack,
+		IdleTimeout:       idleTimeout,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("server starting", "addr", cfg.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("http server failed", "err", err)
-			stop()
+		slog.Info("сервер запускается", "addr", cfg.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
 	}()
 
-	<-ctx.Done()
-	slog.Info("shutting down gracefully...")
+	select {
+	case err := <-serverErr:
+		return err
+	case <-ctx.Done():
+		slog.Info("получен сигнал, останавливаемся")
+	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	_ = srv.Shutdown(shutdownCtx)
-	gSvc.Wait()
-	<-colDone
-	slog.Info("shutdown complete")
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("сервер не остановился мягко", "err", err)
+	}
+	// фоновые сборки отменены вместе с ctx: дожидаемся, пока они запишут итоговый статус
+	gameCatalog.Wait()
+
+	<-collectorDone
+	slog.Info("остановка завершена")
+	return nil
+}
+
+func healthz(pool interface {
+	Ping(context.Context) error
+},
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := pool.Ping(r.Context()); err != nil {
+			http.Error(w, `{"status":"db down"}`, http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}
 }
