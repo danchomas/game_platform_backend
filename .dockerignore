@@ -2,4 +2,6 @@
 web/
 *.md
 .git
+frontend/node_modules
+frontend/dist
 project_dump.txt

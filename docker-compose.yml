@@ -49,5 +49,13 @@ services:
       MAX_CONCURRENT_GEN: ${MAX_CONCURRENT_GEN:-8}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-180}
 
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
 volumes:
   pgdata:
