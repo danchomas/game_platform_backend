@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
+	"time"
 
+	"beeline-games/internal/core/agent"
 	"beeline-games/internal/core/domain"
-	"beeline-games/internal/core/llm"
 )
 
 type GameRepository interface {
@@ -22,10 +23,30 @@ type GameRepository interface {
 	SetTitle(ctx context.Context, id, title string) error
 	DeleteGame(ctx context.Context, id string) error
 	IsPublished(ctx context.Context, id string) (bool, error)
+
+	PipelineRepository
 }
 
-type LLMProvider interface {
-	Chat(ctx context.Context, msgs []llm.Msg) (string, error)
+// PipelineRepository — состояние агентного конвейера и телеметрия генераций.
+type PipelineRepository interface {
+	SetStatus(ctx context.Context, id, status, detail string) error
+	// TrySetStatus атомарно переводит игру в status, только если текущий статус входит в from.
+	TrySetStatus(ctx context.Context, id, status string, from []string) (bool, error)
+	SetSpec(ctx context.Context, id string, spec domain.GameSpec) error
+	AddMessage(ctx context.Context, gameID, role, content string) error
+	ResetInterrupted(ctx context.Context) (int64, error)
+
+	StartGeneration(ctx context.Context, gameID, kind string) (int64, error)
+	FinishGeneration(ctx context.Context, g domain.GenerationResult) error
+	ListGenerations(ctx context.Context, gameID string, limit int) ([]domain.Generation, error)
+	LatestScreenshot(ctx context.Context, gameID string) ([]byte, error)
+	GenerationStats(ctx context.Context, from time.Time) (domain.GenerationStats, error)
+}
+
+// Agent — агентный конвейер из internal/core/agent: план, сборка, проверки, исправления.
+type Agent interface {
+	Plan(ctx context.Context, in agent.PlanInput, tr *agent.Trace) (domain.GameSpec, error)
+	Build(ctx context.Context, in agent.BuildInput, stage agent.Stage, tr *agent.Trace) (agent.BuildOutput, error)
 }
 
 type InsightProvider interface {

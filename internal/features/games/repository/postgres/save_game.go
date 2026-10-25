@@ -14,7 +14,7 @@ import (
 
 func (r *Repository) CreateGame(ctx context.Context, ownerID, prompt string) (string, error) {
 	id := uuid.NewString()
-	_, err := r.pool.Exec(ctx, `INSERT INTO games(id,owner_id,prompt) VALUES($1,$2,$3)`, id, ownerID, prompt)
+	_, err := r.pool.Exec(ctx, `INSERT INTO games(id,owner_id,prompt,status) VALUES($1,$2,$3,'planning')`, id, ownerID, prompt)
 	if err != nil {
 		return "", fmt.Errorf("создание игры: %w", err)
 	}
@@ -45,9 +45,13 @@ func (r *Repository) AddVersion(ctx context.Context, in domain.VersionInput) (in
 		return 0, err
 	}
 
+	instruction := in.Instruction
+	if instruction == "" {
+		instruction = in.UserText
+	}
 	_, err = tx.Exec(ctx,
 		`INSERT INTO game_versions(game_id,version,html,instruction) VALUES($1,$2,$3,$4)`,
-		in.GameID, v, in.HTML, in.UserText)
+		in.GameID, v, in.HTML, instruction)
 	if err != nil {
 		return 0, err
 	}

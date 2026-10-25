@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"beeline-games/internal/core/agent"
 	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
 	"beeline-games/internal/core/llm"
@@ -17,10 +20,11 @@ type fakeRepo struct {
 	games    map[string]domain.Game
 	messages map[string][]domain.Message
 	versions map[string]map[int]string
+	gens     map[int64]domain.GenerationResult
+	genKinds map[int64]string
 
 	nextID  int
-	addErr  error
-	getErr  error
+	nextGen int64
 	deleted []string
 
 	lastQuery domain.GameQuery
@@ -31,6 +35,8 @@ func newFakeRepo() *fakeRepo {
 		games:    make(map[string]domain.Game),
 		messages: make(map[string][]domain.Message),
 		versions: make(map[string]map[int]string),
+		gens:     make(map[int64]domain.GenerationResult),
+		genKinds: make(map[int64]string),
 	}
 }
 
@@ -40,17 +46,32 @@ func (f *fakeRepo) CreateGame(_ context.Context, ownerID, prompt string) (string
 
 	f.nextID++
 	id := "game-" + string(rune('a'+f.nextID-1))
-	f.games[id] = domain.Game{ID: id, OwnerID: ownerID, Prompt: prompt}
+	f.games[id] = domain.Game{ID: id, OwnerID: ownerID, Prompt: prompt, Status: domain.StatusPlanning}
 	return id, nil
+}
+
+// seedGame — готовая собранная игра для тестов правок и отката.
+func (f *fakeRepo) seedGame(ownerID, html string) string {
+	id, _ := f.CreateGame(context.Background(), ownerID, "готовая игра")
+	f.mu.Lock()
+	g := f.games[id]
+	g.Status = domain.StatusReady
+	f.games[id] = g
+	f.mu.Unlock()
+	_, _ = f.AddVersion(context.Background(), domain.VersionInput{GameID: id, Reply: "готово", HTML: html})
+	return id
+}
+
+func (f *fakeRepo) game(id string) domain.Game {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.games[id]
 }
 
 func (f *fakeRepo) GetGame(_ context.Context, id string) (domain.Game, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.getErr != nil {
-		return domain.Game{}, f.getErr
-	}
 	g, ok := f.games[id]
 	if !ok {
 		return domain.Game{}, apperr.ErrNotFound
@@ -78,12 +99,10 @@ func (f *fakeRepo) AddVersion(_ context.Context, in domain.VersionInput) (int, e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.addErr != nil {
-		return 0, f.addErr
+	g, ok := f.games[in.GameID]
+	if !ok {
+		return 0, apperr.ErrNotFound
 	}
-
-	g := f.games[in.GameID]
-	g.ID = in.GameID
 	g.Version++
 	g.HTML = in.HTML
 	if in.Title != "" {
@@ -107,7 +126,7 @@ func (f *fakeRepo) AddVersion(_ context.Context, in domain.VersionInput) (int, e
 func (f *fakeRepo) Messages(_ context.Context, gameID string) ([]domain.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.messages[gameID], nil
+	return slices.Clone(f.messages[gameID]), nil
 }
 
 func (f *fakeRepo) Versions(context.Context, string) ([]domain.VersionInfo, error) { return nil, nil }
@@ -158,61 +177,166 @@ func (f *fakeRepo) IsPublished(_ context.Context, id string) (bool, error) {
 	return f.games[id].Published, nil
 }
 
-type scriptedLLM struct {
-	mu       sync.Mutex
-	replies  []string
-	err      error
-	calls    int
-	lastMsgs []llm.Msg
+func (f *fakeRepo) SetStatus(_ context.Context, id, status, detail string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	g := f.games[id]
+	g.Status, g.StatusDetail = status, detail
+	f.games[id] = g
+	return nil
 }
 
-func (s *scriptedLLM) Chat(ctx context.Context, msgs []llm.Msg) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (f *fakeRepo) TrySetStatus(_ context.Context, id, status string, from []string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-	s.calls++
-	s.lastMsgs = msgs
-
-	if s.err != nil {
-		return "", s.err
+	g, ok := f.games[id]
+	if !ok || !slices.Contains(from, g.Status) {
+		return false, nil
 	}
-	if len(s.replies) == 0 {
-		return "", context.DeadlineExceeded
-	}
-
-	reply := s.replies[0]
-	s.replies = s.replies[1:]
-	return reply, nil
+	g.Status, g.StatusDetail = status, ""
+	f.games[id] = g
+	return true, nil
 }
 
-type blockingLLM struct {
+func (f *fakeRepo) SetSpec(_ context.Context, id string, spec domain.GameSpec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	g := f.games[id]
+	g.Spec, _ = json.Marshal(spec)
+	if spec.Title != "" {
+		g.Title = spec.Title
+	}
+	f.games[id] = g
+	return nil
+}
+
+func (f *fakeRepo) AddMessage(_ context.Context, gameID, role, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.messages[gameID] = append(f.messages[gameID], domain.Message{Role: role, Content: content})
+	return nil
+}
+
+func (f *fakeRepo) ResetInterrupted(context.Context) (int64, error) { return 0, nil }
+
+func (f *fakeRepo) StartGeneration(_ context.Context, _ string, kind string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.nextGen++
+	f.genKinds[f.nextGen] = kind
+	return f.nextGen, nil
+}
+
+func (f *fakeRepo) FinishGeneration(_ context.Context, g domain.GenerationResult) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.gens[g.ID] = g
+	return nil
+}
+
+// lastGen — итог последнего запуска агента указанного вида.
+func (f *fakeRepo) lastGen(kind string) (domain.GenerationResult, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for id := f.nextGen; id > 0; id-- {
+		if f.genKinds[id] == kind {
+			g, ok := f.gens[id]
+			return g, ok
+		}
+	}
+	return domain.GenerationResult{}, false
+}
+
+func (f *fakeRepo) ListGenerations(context.Context, string, int) ([]domain.Generation, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) LatestScreenshot(context.Context, string) ([]byte, error) {
+	return nil, apperr.ErrNotFound
+}
+
+func (f *fakeRepo) GenerationStats(context.Context, time.Time) (domain.GenerationStats, error) {
+	return domain.GenerationStats{}, nil
+}
+
+// fakeAgent — сценарий агента без LLM: план и сборка из заданных значений.
+type fakeAgent struct {
+	mu sync.Mutex
+
+	spec     domain.GameSpec
+	planErr  error
+	html     string
+	issues   []domain.Issue
+	buildErr error
+
+	// block != nil — Build ждёт закрытия канала (проверка конкурентных запросов)
+	block   chan struct{}
 	entered chan struct{}
-	release chan struct{}
-	reply   string
+
+	lastPlan  agent.PlanInput
+	lastBuild agent.BuildInput
+	builds    int
 }
 
-func (b *blockingLLM) Chat(ctx context.Context, _ []llm.Msg) (string, error) {
-	b.entered <- struct{}{}
-	select {
-	case <-b.release:
-		return b.reply, nil
-	case <-ctx.Done():
-		return "", ctx.Err()
+func (a *fakeAgent) Plan(_ context.Context, in agent.PlanInput, tr *agent.Trace) (domain.GameSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.lastPlan = in
+	tr.Calls = append(tr.Calls, domain.LLMCall{Role: "planner", CostUSD: 0.001})
+	return a.spec, a.planErr
+}
+
+func (a *fakeAgent) Build(ctx context.Context, in agent.BuildInput, stage agent.Stage, tr *agent.Trace) (agent.BuildOutput, error) {
+	a.mu.Lock()
+	a.lastBuild = in
+	a.builds++
+	block, entered := a.block, a.entered
+	a.mu.Unlock()
+
+	stage(domain.StatusGenerating, "")
+	if entered != nil {
+		entered <- struct{}{}
 	}
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return agent.BuildOutput{}, ctx.Err()
+		}
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr.Calls = append(tr.Calls, domain.LLMCall{Role: "coder", CostUSD: 0.01})
+	tr.Issues = a.issues
+	if a.buildErr != nil {
+		return agent.BuildOutput{}, a.buildErr
+	}
+	return agent.BuildOutput{
+		HTML:   a.html,
+		Result: llm.Result{Reply: "Готово", Title: "Змейка", Genre: "snake"},
+		Issues: a.issues,
+	}, nil
 }
 
 type staticInsights struct{ hint string }
 
 func (s staticInsights) GetInsightsHint(context.Context) string { return s.hint }
 
-func goodReply(title, marker string) string {
-	html := "<!doctype html><html><head></head><body><canvas></canvas><script>" +
+func gameHTML(marker string) string {
+	return "<!doctype html><html><head></head><body><canvas></canvas><script>" +
 		marker + strings.Repeat("// наполнение до минимального размера\n", 12) +
 		"</script></body></html>"
-
-	return "<reply>готово</reply>" +
-		`<meta>{"Title":"` + title + `","Genre":"аркада","Audience":"все"}</meta>` +
-		"<game>" + html + "</game>"
 }
 
-const testTimeout = 2 * time.Second
+func snakeSpec() domain.GameSpec {
+	return domain.GameSpec{Title: "Змейка", Genre: "snake", Summary: "• Змейка для бабушки"}
+}

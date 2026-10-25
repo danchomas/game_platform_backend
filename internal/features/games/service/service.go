@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -20,31 +21,41 @@ const (
 	maxGalleryLimit     = 100
 	maxOffset           = 1 << 20
 
-	waitForSlot = 20 * time.Second
+	// План — короткий синхронный вызов; сборка идёт в фоне и может подождать слот дольше.
+	waitForSlot      = 20 * time.Second
+	waitForBuildSlot = 3 * time.Minute
+
+	generationsLimit = 50
 )
 
 type Service struct {
-	repo       GameRepository
-	llm        LLMProvider
-	insights   InsightProvider
-	llmTimeout time.Duration
+	repo     GameRepository
+	agent    Agent
+	insights InsightProvider
 
-	genSem   chan struct{}
-	inflight sync.Map
+	// bg — контекст приложения: фоновые сборки живут дольше HTTP-запроса.
+	bg     context.Context
+	genSem chan struct{}
+	jobs   sync.WaitGroup
+	events *broker
 }
 
-func NewService(repo GameRepository, model LLMProvider, insights InsightProvider, maxConcurrent int, llmTimeout time.Duration) *Service {
+func NewService(bg context.Context, repo GameRepository, ag Agent, insights InsightProvider, maxConcurrent int) *Service {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
 	return &Service{
-		repo:       repo,
-		llm:        model,
-		insights:   insights,
-		llmTimeout: llmTimeout,
-		genSem:     make(chan struct{}, maxConcurrent),
+		repo:     repo,
+		agent:    ag,
+		insights: insights,
+		bg:       bg,
+		genSem:   make(chan struct{}, maxConcurrent),
+		events:   newBroker(),
 	}
 }
+
+// Wait дожидается фоновых сборок (graceful shutdown: их контекст уже отменён).
+func (s *Service) Wait() { s.jobs.Wait() }
 
 func ownerQuery(limit, offset int) domain.GameQuery {
 	return domain.GameQuery{

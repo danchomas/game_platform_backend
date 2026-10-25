@@ -4,149 +4,325 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
 )
 
-func newTestService(repo GameRepository, model LLMProvider) *Service {
-	return NewService(repo, model, staticInsights{}, 4, testTimeout)
+func newTestService(repo GameRepository, ag Agent) *Service {
+	return NewService(context.Background(), repo, ag, staticInsights{}, 4)
 }
 
-func TestCreateAndGenerateSavesVersion(t *testing.T) {
+func TestCreateGameReturnsPlanAwaitingApproval(t *testing.T) {
 	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{goodReply("Змейка", "let snake;")}}
-	svc := newTestService(repo, model)
+	svc := newTestService(repo, &fakeAgent{spec: snakeSpec()})
 
-	game, reply, version, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай змейку")
+	game, plan, err := svc.CreateGame(context.Background(), "owner-1", "змейка для бабушки", false)
 	if err != nil {
-		t.Fatalf("генерация не удалась: %v", err)
+		t.Fatalf("план не составлен: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("версия = %d, ожидалась 1", version)
+	if game.Status != domain.StatusAwaitingApproval {
+		t.Errorf("статус = %q, ожидался %q", game.Status, domain.StatusAwaitingApproval)
 	}
-	if game.Title != "Змейка" {
-		t.Errorf("название = %q, ожидалось %q", game.Title, "Змейка")
+	if plan.Spec.Title != "Змейка" || plan.Reply == "" {
+		t.Errorf("план потерян: %+v", plan)
 	}
-	if reply == "" {
-		t.Error("реплика модели пуста")
+	if len(game.Spec) == 0 {
+		t.Error("план не сохранён в игре")
 	}
-	if !game.Generated() {
-		t.Error("игра помечена как несгенерированная")
+	if game.Version != 0 {
+		t.Errorf("до подтверждения кода быть не должно, версия %d", game.Version)
+	}
+
+	msgs, _ := repo.Messages(context.Background(), game.ID)
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Content != plan.Reply {
+		t.Errorf("в чате нет запроса и плана: %+v", msgs)
+	}
+	if gen, ok := repo.lastGen(domain.GenPlan); !ok || gen.Status != domain.GenStatusReady || len(gen.Calls) == 0 {
+		t.Errorf("запуск планировщика не записан: %+v", gen)
 	}
 }
 
-func TestCreateAndGenerateRejectsShortPrompt(t *testing.T) {
-	svc := newTestService(newFakeRepo(), &scriptedLLM{})
+func TestCreateGameRejectsShortPrompt(t *testing.T) {
+	svc := newTestService(newFakeRepo(), &fakeAgent{})
 
-	_, _, _, err := svc.CreateAndGenerate(context.Background(), "owner-1", " a ")
-	if !errors.Is(err, apperr.ErrValidation) {
-		t.Fatalf("ожидалась ошибка валидации, получено: %v", err)
-	}
+	_, _, err := svc.CreateGame(context.Background(), "owner-1", " a ", false)
 
 	var vErr *apperr.ValidationError
 	if !errors.As(err, &vErr) || vErr.Field != "prompt" {
-		t.Errorf("ошибка не указывает поле prompt: %v", err)
+		t.Fatalf("ожидалась ошибка валидации поля prompt, получено: %v", err)
 	}
 }
 
-func TestCreateAndGenerateDropsGameWhenModelFails(t *testing.T) {
+func TestCreateGameKeepsFailedDraftWhenPlanFails(t *testing.T) {
 	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{"я не умею делать игры", "и сейчас тоже"}}
-	svc := newTestService(repo, model)
+	svc := newTestService(repo, &fakeAgent{planErr: apperr.ErrLLMFailed})
 
-	_, _, _, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай змейку")
+	_, _, err := svc.CreateGame(context.Background(), "owner-1", "сделай змейку", false)
 	if !errors.Is(err, apperr.ErrLLMFailed) {
 		t.Fatalf("ожидалась ErrLLMFailed, получено: %v", err)
 	}
-	if len(repo.deleted) != 1 {
-		t.Fatalf("карточка не удалена, удалено записей: %d", len(repo.deleted))
+	g := repo.game("game-a")
+	if g.Status != domain.StatusFailed || g.StatusDetail == "" {
+		t.Errorf("черновик не помечен как failed: %+v", g)
 	}
-	if len(repo.games) != 0 {
-		t.Errorf("в каталоге осталось %d игр", len(repo.games))
+	if gen, _ := repo.lastGen(domain.GenPlan); gen.Status != domain.GenStatusFailed {
+		t.Errorf("неудачный план не попал в статистику: %+v", gen)
 	}
 }
 
-func TestGenerateRetriesUnparsableReply(t *testing.T) {
+func TestApprovePlanBuildsInBackground(t *testing.T) {
 	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{"ответ без кода", goodReply("Тетрис", "let board;")}}
-	svc := newTestService(repo, model)
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let snake;")}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
 
-	_, _, version, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай тетрис")
+	game, _, err := svc.CreateGame(ctx, "owner-1", "змейка", false)
 	if err != nil {
-		t.Fatalf("повторная попытка не сработала: %v", err)
+		t.Fatalf("план: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("версия = %d, ожидалась 1", version)
-	}
-	if model.calls != 2 {
-		t.Errorf("модель вызвана %d раз, ожидалось 2", model.calls)
-	}
-}
-
-func TestGenerateRejectsHTMLWithExternalResource(t *testing.T) {
-	repo := newFakeRepo()
-	bad := strings.Replace(goodReply("Игра", "let x;"), "<canvas></canvas>",
-		`<script src="https://cdn.example.com/engine.js"></script>`, 1)
-	model := &scriptedLLM{replies: []string{bad, bad}}
-	svc := newTestService(repo, model)
-
-	_, _, _, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай игру")
-	if !errors.Is(err, apperr.ErrLLMFailed) {
-		t.Fatalf("внешний ресурс не отклонён: %v", err)
-	}
-}
-
-func TestIterateGameRejectsConcurrentGeneration(t *testing.T) {
-	repo := newFakeRepo()
-	model := &blockingLLM{
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-		reply:   goodReply("Игра", "let x;"),
-	}
-	svc := newTestService(repo, model)
-
-	id, err := repo.CreateGame(context.Background(), "owner-1", "первая")
+	started, err := svc.ApprovePlan(ctx, "owner-1", game.ID, nil)
 	if err != nil {
-		t.Fatalf("подготовка не удалась: %v", err)
+		t.Fatalf("подтверждение: %v", err)
+	}
+	if !domain.Busy(started.Status) {
+		t.Errorf("после подтверждения сборка должна идти, статус %q", started.Status)
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, _, _, _ = svc.IterateGame(context.Background(), "owner-1", id, "сделай кнопки больше")
-	}()
+	svc.Wait()
 
-	<-model.entered
+	g := repo.game(game.ID)
+	if g.Status != domain.StatusReady || g.Version != 1 || !g.Generated() {
+		t.Fatalf("игра не собрана: статус %q, версия %d", g.Status, g.Version)
+	}
+	if ag.lastBuild.Spec == nil || ag.lastBuild.Spec.Title != "Змейка" {
+		t.Error("сборка шла не по утверждённому плану")
+	}
+	gen, _ := repo.lastGen(domain.GenBuild)
+	if gen.Status != domain.GenStatusReady || gen.Version == nil || *gen.Version != 1 {
+		t.Errorf("запуск сборки записан неверно: %+v", gen)
+	}
+}
 
-	_, _, _, err = svc.IterateGame(context.Background(), "owner-1", id, "и ещё фон поменяй")
-	if !errors.Is(err, apperr.ErrConflict) {
+func TestApprovePlanUsesEditedSpec(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let x;")}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+
+	game, _, _ := svc.CreateGame(ctx, "owner-1", "змейка", false)
+	edited := snakeSpec()
+	edited.Controls.Scheme = "buttons"
+	if _, err := svc.ApprovePlan(ctx, "owner-1", game.ID, &edited); err != nil {
+		t.Fatalf("подтверждение: %v", err)
+	}
+	svc.Wait()
+
+	if ag.lastBuild.Spec == nil || ag.lastBuild.Spec.Controls.Scheme != "buttons" {
+		t.Errorf("отредактированный план не дошёл до сборки: %+v", ag.lastBuild.Spec)
+	}
+}
+
+func TestApprovePlanRejectsSecondBuild(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let x;"),
+		block: make(chan struct{}), entered: make(chan struct{}, 1)}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+
+	game, _, _ := svc.CreateGame(ctx, "owner-1", "змейка", false)
+	if _, err := svc.ApprovePlan(ctx, "owner-1", game.ID, nil); err != nil {
+		t.Fatalf("первое подтверждение: %v", err)
+	}
+	<-ag.entered
+
+	if _, err := svc.ApprovePlan(ctx, "owner-1", game.ID, nil); !errors.Is(err, apperr.ErrConflict) {
+		t.Errorf("повторная сборка во время сборки: ожидался ErrConflict, получено %v", err)
+	}
+	if _, _, err := svc.RevisePlan(ctx, "owner-1", game.ID, "помедленнее"); !errors.Is(err, apperr.ErrConflict) {
+		t.Errorf("правка плана во время сборки: ожидался ErrConflict, получено %v", err)
+	}
+
+	close(ag.block)
+	svc.Wait()
+}
+
+func TestBuildWithUnfixedIssuesIsMarked(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let x;"),
+		issues: []domain.Issue{{Code: "not_started", Severity: domain.SevError, Message: "x"}}}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+
+	game, _, _ := svc.CreateGame(ctx, "owner-1", "змейка", false)
+	_, _ = svc.ApprovePlan(ctx, "owner-1", game.ID, nil)
+	svc.Wait()
+
+	g := repo.game(game.ID)
+	if g.Version != 1 || !strings.Contains(g.StatusDetail, "not_started") {
+		t.Errorf("игра с проблемами должна сохраниться с пояснением: %+v", g)
+	}
+	if gen, _ := repo.lastGen(domain.GenBuild); gen.Status != domain.GenStatusWithIssues {
+		t.Errorf("статус запуска = %q, ожидался %q", gen.Status, domain.GenStatusWithIssues)
+	}
+}
+
+func TestFailedFirstBuildKeepsPlanForRetry(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec(), buildErr: apperr.ErrLLMFailed}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+
+	game, _, _ := svc.CreateGame(ctx, "owner-1", "змейка", false)
+	_, _ = svc.ApprovePlan(ctx, "owner-1", game.ID, nil)
+	svc.Wait()
+
+	g := repo.game(game.ID)
+	if g.Status != domain.StatusFailed || !g.PlanStage() {
+		t.Fatalf("неудачная сборка должна вернуть игру к плану: %+v", g)
+	}
+
+	ag.buildErr, ag.html = nil, gameHTML("let x;")
+	if _, err := svc.ApprovePlan(ctx, "owner-1", game.ID, nil); err != nil {
+		t.Fatalf("повторная сборка недоступна: %v", err)
+	}
+	svc.Wait()
+	if repo.game(game.ID).Version != 1 {
+		t.Error("повторная сборка не сохранила версию")
+	}
+}
+
+func TestRevisePlanSendsFeedbackAndCurrentPlan(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec()}
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+
+	game, _, _ := svc.CreateGame(ctx, "owner-1", "змейка", false)
+	if _, _, err := svc.RevisePlan(ctx, "owner-1", game.ID, "сделай управление кнопками"); err != nil {
+		t.Fatalf("правка плана: %v", err)
+	}
+	if ag.lastPlan.Current == nil || ag.lastPlan.Feedback != "сделай управление кнопками" {
+		t.Errorf("планировщик не получил текущий план и отзыв: %+v", ag.lastPlan)
+	}
+	if repo.game(game.ID).Status != domain.StatusAwaitingApproval {
+		t.Error("после правки план снова должен ждать подтверждения")
+	}
+}
+
+func TestRevisePlanAfterBuildIsRejected(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestService(repo, &fakeAgent{})
+	id := repo.seedGame("owner-1", gameHTML("let x;"))
+
+	_, _, err := svc.RevisePlan(context.Background(), "owner-1", id, "поменяй жанр")
+	if !errors.Is(err, apperr.ErrValidation) {
+		t.Fatalf("собранную игру нельзя перепланировать: %v", err)
+	}
+}
+
+func TestIterateGameEditsInBackground(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{html: gameHTML("let v2;")}
+	svc := newTestService(repo, ag)
+	id := repo.seedGame("owner-1", gameHTML("let v1;"))
+
+	if _, err := svc.IterateGame(context.Background(), "owner-1", id, "сделай кнопки больше"); err != nil {
+		t.Fatalf("правка: %v", err)
+	}
+	svc.Wait()
+
+	g := repo.game(id)
+	if g.Version != 2 || !strings.Contains(g.HTML, "let v2;") || g.Status != domain.StatusReady {
+		t.Errorf("правка не применена: версия %d, статус %q", g.Version, g.Status)
+	}
+	if !strings.Contains(ag.lastBuild.CurrentHTML, "let v1;") || ag.lastBuild.Instruction != "сделай кнопки больше" {
+		t.Error("агент не получил текущий код и просьбу")
+	}
+}
+
+func TestFailedEditKeepsWorkingVersion(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestService(repo, &fakeAgent{buildErr: apperr.ErrLLMFailed})
+	id := repo.seedGame("owner-1", gameHTML("let v1;"))
+
+	_, _ = svc.IterateGame(context.Background(), "owner-1", id, "сделай кнопки больше")
+	svc.Wait()
+
+	g := repo.game(id)
+	if g.Status != domain.StatusReady || g.Version != 1 || g.StatusDetail == "" {
+		t.Errorf("после неудачной правки должна остаться рабочая версия с пояснением: %+v", g)
+	}
+}
+
+func TestIterateGameRejectsConcurrentEdit(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{html: gameHTML("let x;"), block: make(chan struct{}), entered: make(chan struct{}, 1)}
+	svc := newTestService(repo, ag)
+	id := repo.seedGame("owner-1", gameHTML("let v1;"))
+	ctx := context.Background()
+
+	if _, err := svc.IterateGame(ctx, "owner-1", id, "сделай кнопки больше"); err != nil {
+		t.Fatalf("первая правка: %v", err)
+	}
+	<-ag.entered
+
+	if _, err := svc.IterateGame(ctx, "owner-1", id, "и фон поменяй"); !errors.Is(err, apperr.ErrConflict) {
 		t.Errorf("ожидался ErrConflict, получено: %v", err)
 	}
 
-	close(model.release)
-	wg.Wait()
+	close(ag.block)
+	svc.Wait()
+}
+
+func TestIterateGameRequiresCode(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestService(repo, &fakeAgent{spec: snakeSpec()})
+
+	game, _, _ := svc.CreateGame(context.Background(), "owner-1", "змейка", false)
+	if _, err := svc.IterateGame(context.Background(), "owner-1", game.ID, "поменяй цвет"); !errors.Is(err, apperr.ErrNotGenerated) {
+		t.Fatalf("правка игры без кода: ожидался ErrNotGenerated, получено %v", err)
+	}
 }
 
 func TestIterateGameRejectsForeignGame(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestService(repo, &scriptedLLM{})
+	svc := newTestService(repo, &fakeAgent{})
+	id := repo.seedGame("owner-1", gameHTML("let x;"))
 
-	id, _ := repo.CreateGame(context.Background(), "owner-1", "первая")
-
-	_, _, _, err := svc.IterateGame(context.Background(), "owner-2", id, "поменяй цвет")
-	if !errors.Is(err, apperr.ErrForbidden) {
+	if _, err := svc.IterateGame(context.Background(), "owner-2", id, "поменяй цвет"); !errors.Is(err, apperr.ErrForbidden) {
 		t.Fatalf("чужая игра доступна на правку: %v", err)
+	}
+}
+
+func TestInsightsHintReachesAgent(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec()}
+	svc := NewService(context.Background(), repo, ag, staticInsights{hint: "- \"Змейка\": 120 sessions"}, 4)
+
+	if _, _, err := svc.CreateGame(context.Background(), "owner-1", "сделай игру", false); err != nil {
+		t.Fatalf("план: %v", err)
+	}
+	if !strings.Contains(ag.lastPlan.Hint.TopGames, "Змейка") {
+		t.Error("подсказка аналитики не дошла до агента")
+	}
+}
+
+func TestGenerationStatsForManagersOnly(t *testing.T) {
+	svc := newTestService(newFakeRepo(), &fakeAgent{})
+
+	if _, err := svc.GenerationStats(context.Background(), "player", 30); !errors.Is(err, apperr.ErrForbidden) {
+		t.Errorf("игрок видит статистику генераций: %v", err)
+	}
+	if st, err := svc.GenerationStats(context.Background(), roleManager, 0); err != nil || st.Days != 30 {
+		t.Errorf("менеджер: %+v, %v", st, err)
 	}
 }
 
 func TestGetGameHidesForeignDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestService(repo, &scriptedLLM{})
+	svc := newTestService(repo, &fakeAgent{})
 
 	id, _ := repo.CreateGame(context.Background(), "owner-1", "черновик")
 
@@ -160,19 +336,18 @@ func TestGetGameHidesForeignDraft(t *testing.T) {
 
 func TestPublishRequiresGeneratedCode(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestService(repo, &scriptedLLM{})
+	svc := newTestService(repo, &fakeAgent{})
 
 	id, _ := repo.CreateGame(context.Background(), "owner-1", "пустая")
 
-	_, err := svc.PublishGame(context.Background(), "owner-1", id, true)
-	if !errors.Is(err, apperr.ErrNotGenerated) {
+	if _, err := svc.PublishGame(context.Background(), "owner-1", id, true); !errors.Is(err, apperr.ErrNotGenerated) {
 		t.Fatalf("опубликована игра без кода: %v", err)
 	}
 }
 
 func TestListQueryBoundsAreEnforcedByService(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestService(repo, &scriptedLLM{})
+	svc := newTestService(repo, &fakeAgent{})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -222,7 +397,7 @@ func TestListQueryBoundsAreEnforcedByService(t *testing.T) {
 
 func TestGalleryNormalizesSort(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestService(repo, &scriptedLLM{})
+	svc := newTestService(repo, &fakeAgent{})
 
 	_, _ = svc.GetGallery(context.Background(), "что-то своё", "", 10, 0)
 	if repo.lastQuery.Sort != domain.SortNew {
@@ -237,22 +412,15 @@ func TestGalleryNormalizesSort(t *testing.T) {
 
 func TestRestoreVersionAppendsNewVersion(t *testing.T) {
 	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{
-		goodReply("Игра", "let v1;"),
-		goodReply("Игра", "let v2;"),
-	}}
-	svc := newTestService(repo, model)
+	svc := newTestService(repo, &fakeAgent{})
 	ctx := context.Background()
 
-	game, _, _, err := svc.CreateAndGenerate(ctx, "owner-1", "сделай игру")
-	if err != nil {
-		t.Fatalf("первая генерация: %v", err)
-	}
-	if _, _, _, err := svc.IterateGame(ctx, "owner-1", game.ID, "поменяй цвет"); err != nil {
-		t.Fatalf("вторая генерация: %v", err)
+	id := repo.seedGame("owner-1", gameHTML("let v1;"))
+	if _, err := repo.AddVersion(ctx, domain.VersionInput{GameID: id, Reply: "v2", HTML: gameHTML("let v2;")}); err != nil {
+		t.Fatalf("подготовка: %v", err)
 	}
 
-	restored, _, version, err := svc.RestoreVersion(ctx, "owner-1", game.ID, 1)
+	restored, _, version, err := svc.RestoreVersion(ctx, "owner-1", id, 1)
 	if err != nil {
 		t.Fatalf("откат не удался: %v", err)
 	}
@@ -262,62 +430,4 @@ func TestRestoreVersionAppendsNewVersion(t *testing.T) {
 	if !strings.Contains(restored.HTML, "let v1;") {
 		t.Error("откат вернул не тот код")
 	}
-}
-
-func TestInsightsHintReachesPrompt(t *testing.T) {
-	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{goodReply("Игра", "let x;")}}
-	svc := NewService(repo, model, staticInsights{hint: "- \"Змейка\": 120 sessions"}, 4, testTimeout)
-
-	if _, _, _, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай игру"); err != nil {
-		t.Fatalf("генерация не удалась: %v", err)
-	}
-
-	var joined strings.Builder
-	for _, m := range model.lastMsgs {
-		joined.WriteString(m.Content)
-	}
-	if !strings.Contains(joined.String(), "Змейка") {
-		t.Error("подсказка аналитики не дошла до промпта")
-	}
-}
-
-func TestGenerateWithoutInsightsProvider(t *testing.T) {
-	repo := newFakeRepo()
-	model := &scriptedLLM{replies: []string{goodReply("Игра", "let x;")}}
-	svc := NewService(repo, model, nil, 4, testTimeout)
-
-	if _, _, _, err := svc.CreateAndGenerate(context.Background(), "owner-1", "сделай игру"); err != nil {
-		t.Fatalf("генерация без подсказчика не удалась: %v", err)
-	}
-}
-
-func TestGenerateReportsCapacityWhenSlotsBusy(t *testing.T) {
-	repo := newFakeRepo()
-	model := &blockingLLM{
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-		reply:   goodReply("Игра", "let x;"),
-	}
-	svc := NewService(repo, model, nil, 1, testTimeout)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, _, _, _ = svc.CreateAndGenerate(context.Background(), "owner-1", "первая игра")
-	}()
-
-	<-model.entered
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	_, _, _, err := svc.CreateAndGenerate(ctx, "owner-2", "вторая игра")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("ожидалось истечение ожидания слота, получено: %v", err)
-	}
-
-	close(model.release)
-	wg.Wait()
 }

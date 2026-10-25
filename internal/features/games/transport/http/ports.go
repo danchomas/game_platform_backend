@@ -7,8 +7,16 @@ import (
 )
 
 type Games interface {
-	CreateAndGenerate(ctx context.Context, ownerID, prompt string) (domain.Game, string, int, error)
-	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, string, int, error)
+	// агентный конвейер: план → правка плана → подтверждение → фоновая сборка → правки в чате
+	CreateGame(ctx context.Context, ownerID, prompt string, autoApprove bool) (domain.Game, domain.Plan, error)
+	RevisePlan(ctx context.Context, userID, gameID, feedback string) (domain.Game, domain.Plan, error)
+	ApprovePlan(ctx context.Context, userID, gameID string, spec *domain.GameSpec) (domain.Game, error)
+	IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, error)
+	GetStatus(ctx context.Context, userID, gameID string) (domain.Game, error)
+	Subscribe(ctx context.Context, userID, gameID string) (domain.Game, <-chan domain.StatusEvent, func(), error)
+	ListGenerations(ctx context.Context, userID, gameID string) ([]domain.Generation, error)
+	Screenshot(ctx context.Context, userID, gameID string) ([]byte, error)
+	GenerationStats(ctx context.Context, role string, days int) (domain.GenerationStats, error)
 
 	GetGame(ctx context.Context, userID, gameID string) (domain.Game, error)
 	GetMyGames(ctx context.Context, userID string, limit, offset int) ([]domain.Game, error)
