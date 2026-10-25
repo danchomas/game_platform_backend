@@ -102,10 +102,11 @@ func run() error {
 		},
 		MaxFixRounds: cfg.MaxFixRounds,
 		CallTimeout:  cfg.LLMTimeout,
+		Reasoning:    cfg.Reasoning,
 	})
 	slog.Info("агент настроен",
 		"planner", cfg.PlannerModel, "coder", cfg.OpenRouterModel, "fixer", cfg.FixerModel,
-		"fix_rounds", cfg.MaxFixRounds, "browser_test", tester != nil)
+		"fix_rounds", cfg.MaxFixRounds, "reasoning", cfg.Reasoning, "browser_test", tester != nil)
 
 	users := authRepo.NewRepository(pool)
 	games := gamesRepo.NewRepository(pool)

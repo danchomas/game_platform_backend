@@ -80,6 +80,20 @@ type chatRequest struct {
 	MaxTokens   int            `json:"max_tokens"`
 	Temperature float64        `json:"temperature"`
 	Usage       map[string]any `json:"usage,omitempty"`
+	Reasoning   map[string]any `json:"reasoning,omitempty"`
+}
+
+// reasoningParam — параметр reasoning OpenRouter. Текст рассуждений не запрашиваем (exclude):
+// агенту нужен только ответ, а токены рассуждений всё равно оплачиваются и видны в usage.
+func reasoningParam(level string) map[string]any {
+	switch level {
+	case ReasoningOff:
+		return map[string]any{"enabled": false}
+	case ReasoningLow, ReasoningMedium, ReasoningHigh:
+		return map[string]any{"effort": level, "exclude": true}
+	default:
+		return nil
+	}
 }
 
 type chatResponse struct {
@@ -131,6 +145,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
 		Usage:       map[string]any{"include": true},
+		Reasoning:   reasoningParam(req.Reasoning),
 	}
 	if len(req.Fallbacks) > 0 {
 		payload.Models = append([]string{model}, req.Fallbacks...)
@@ -159,7 +174,11 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 		lastErr = err
 		var se *statusError
 		if !errors.As(err, &se) || !se.retryable() {
-			return Response{}, err
+			// usage и finish_reason отдаём и при ошибке: по ним видно, куда ушли токены
+			if resp.Model == "" {
+				resp.Model = model
+			}
+			return resp, err
 		}
 	}
 	return Response{}, lastErr
@@ -229,11 +248,6 @@ func parseChatResponse(status int, raw []byte) (Response, error) {
 	}
 
 	choice := out.Choices[0]
-	if strings.TrimSpace(choice.Message.Content) == "" {
-		return Response{}, fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
-			apperr.ErrLLMFailed, choice.FinishReason)
-	}
-
 	r := Response{Text: choice.Message.Content, Model: out.Model, FinishReason: choice.FinishReason}
 	if out.Usage != nil {
 		r.Usage = Usage{
@@ -241,6 +255,14 @@ func parseChatResponse(status int, raw []byte) (Response, error) {
 			CompletionTokens: out.Usage.CompletionTokens,
 			CostUSD:          out.Usage.Cost,
 		}
+	}
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		err := fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
+			apperr.ErrLLMFailed, choice.FinishReason)
+		if r.Truncated() {
+			err = fmt.Errorf("%w: %w", err, ErrEmptyTruncated)
+		}
+		return r, err
 	}
 	return r, nil
 }

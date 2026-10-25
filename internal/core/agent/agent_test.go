@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
 	"beeline-games/internal/core/gamekit"
 	"beeline-games/internal/core/llm"
@@ -153,4 +155,31 @@ type capture struct {
 func (c *capture) Complete(_ context.Context, r llm.Request) (llm.Response, error) {
 	c.fn(r)
 	return llm.Response{Text: c.answer, FinishReason: "stop"}, nil
+}
+
+type reasoningLLM struct{ reqs []llm.Request }
+
+func (r *reasoningLLM) Complete(_ context.Context, req llm.Request) (llm.Response, error) {
+	r.reqs = append(r.reqs, req)
+	if len(r.reqs) == 1 {
+		return llm.Response{FinishReason: "length", Usage: llm.Usage{CompletionTokens: 32000}},
+			fmt.Errorf("%w: %w", apperr.ErrLLMFailed, llm.ErrEmptyTruncated)
+	}
+	return llm.Response{Text: `{"title":"Змейка"}`, FinishReason: "stop"}, nil
+}
+
+func TestCallRetriesWithoutReasoningWhenBudgetIsExhausted(t *testing.T) {
+	l := &reasoningLLM{}
+	a := New(l, nil, Config{Models: Models{Planner: "p", Coder: "c"}, Reasoning: llm.ReasoningLow})
+	tr := &Trace{}
+
+	if _, err := a.Plan(context.Background(), PlanInput{Prompt: "змейка"}, tr); err != nil {
+		t.Fatalf("план после повтора: %v", err)
+	}
+	if len(l.reqs) != 2 || l.reqs[0].Reasoning != llm.ReasoningLow || l.reqs[1].Reasoning != llm.ReasoningOff {
+		t.Fatalf("ожидался повтор с reasoning=off: %+v", l.reqs)
+	}
+	if len(tr.Calls) != 2 || tr.Calls[0].CompletionTokens != 32000 || tr.Calls[0].Error == "" {
+		t.Errorf("неудачная попытка должна остаться в телеметрии с токенами: %+v", tr.Calls)
+	}
 }

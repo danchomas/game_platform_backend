@@ -186,3 +186,44 @@ func TestChatPropagatesCancellation(t *testing.T) {
 		t.Fatalf("ожидалась context.Canceled, получено: %v", err)
 	}
 }
+
+func TestCompleteSendsReasoningBudget(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient("test-key", "test/model", srv.URL, time.Second)
+	if _, err := c.Complete(context.Background(), Request{Messages: []Msg{{Role: "user", Content: "x"}}, Reasoning: ReasoningLow}); err != nil {
+		t.Fatalf("неожиданная ошибка: %v", err)
+	}
+	r, _ := got["reasoning"].(map[string]any)
+	if r["effort"] != "low" || r["exclude"] != true {
+		t.Errorf("reasoning в запросе = %v, ожидался effort=low, exclude=true", got["reasoning"])
+	}
+
+	if _, err := c.Complete(context.Background(), Request{Messages: []Msg{{Role: "user", Content: "x"}}, Reasoning: ReasoningOff}); err != nil {
+		t.Fatalf("неожиданная ошибка: %v", err)
+	}
+	if r, _ := got["reasoning"].(map[string]any); r["enabled"] != false {
+		t.Errorf("reasoning=off должен выключать рассуждения, получено %v", got["reasoning"])
+	}
+}
+
+func TestEmptyTruncatedKeepsUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"model":"m","choices":[{"message":{"content":""},"finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":32000,"cost":0.02}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient("test-key", "test/model", srv.URL, time.Second)
+	resp, err := c.Complete(context.Background(), Request{Messages: []Msg{{Role: "user", Content: "x"}}})
+	if !errors.Is(err, ErrEmptyTruncated) || !errors.Is(err, apperr.ErrLLMFailed) {
+		t.Fatalf("ожидались ErrEmptyTruncated и ErrLLMFailed, получено: %v", err)
+	}
+	if resp.Usage.CompletionTokens != 32000 || resp.FinishReason != "length" {
+		t.Errorf("usage при пустом ответе потерян: %+v", resp)
+	}
+}

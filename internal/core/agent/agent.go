@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type Config struct {
 	Models       Models
 	MaxFixRounds int
 	CallTimeout  time.Duration
+	// Reasoning — бюджет рассуждений «думающих» моделей (llm.Reasoning*), см. LLM_REASONING.
+	Reasoning string
 }
 
 type Agent struct {
@@ -93,7 +96,17 @@ func (t *Trace) Usage() llm.Usage {
 // Stage сообщает наружу о смене шага (для статуса игры и SSE).
 type Stage func(status, detail string)
 
+// call вызывает модель. Если «думающая» модель израсходовала лимит на рассуждения и не
+// ответила, вызов повторяется один раз с выключенными рассуждениями.
 func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, tr *Trace) (string, error) {
+	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, a.cfg.Reasoning, tr)
+	if errors.Is(err, llm.ErrEmptyTruncated) && a.cfg.Reasoning != llm.ReasoningOff {
+		return a.callOnce(ctx, role, model, msgs, temp, maxCont, llm.ReasoningOff, tr)
+	}
+	return text, err
+}
+
+func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, tr *Trace) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, a.cfg.CallTimeout)
 	defer cancel()
 
@@ -103,6 +116,7 @@ func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, te
 		Messages:    msgs,
 		MaxTokens:   a.cfg.Models.MaxTokens,
 		Temperature: temp,
+		Reasoning:   reasoning,
 	}, maxCont)
 
 	c := domain.LLMCall{

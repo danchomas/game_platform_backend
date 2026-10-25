@@ -35,6 +35,7 @@ gofmt -l -w . && go vet ./...
 | `LLM_FALLBACK_MODELS` | пусто | запасные модели через запятую (поле `models` OpenRouter) |
 | `LLM_MAX_TOKENS` | `32000` | лимит ответа; оборванный ответ агент просит продолжить |
 | `MAX_FIX_ROUNDS` | `2` | кругов «тест → исправление» на одну сборку |
+| `LLM_REASONING` | `low` | бюджет скрытых рассуждений «думающих» моделей (`off`/`low`/`medium`/`high`); они расходуют тот же `LLM_MAX_TOKENS`. Если модель потратила всё на рассуждения и не ответила, агент повторяет вызов с `off` |
 | `BROWSER_WS_URL` | пусто (в compose `ws://browser:9222`) | DevTools headless Chrome; пусто — только статическая проверка |
 | `BROWSER_TEST_TIMEOUT_SEC` / `BROWSER_MAX_PARALLEL` | `40` / `2` | таймаут и параллельность теста в браузере |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | внешний адрес: из него собираются ссылки на игру и адрес SDK |

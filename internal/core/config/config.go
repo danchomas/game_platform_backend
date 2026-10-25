@@ -19,6 +19,8 @@ const (
 	defaultLLMTimeoutSec    = 240
 	defaultLLMMaxTokens     = 32000
 	defaultMaxFixRounds     = 2
+	// low: на рассуждения уходит ~20% max_tokens, остальное — на ответ с кодом игры
+	defaultReasoning = "low"
 
 	defaultBrowserTimeoutSec  = 40
 	defaultBrowserMaxParallel = 2
@@ -40,6 +42,8 @@ type Config struct {
 	FallbackModels []string
 	LLMMaxTokens   int
 	MaxFixRounds   int
+	// Reasoning — бюджет рассуждений «думающих» моделей: off, low, medium, high.
+	Reasoning string
 
 	// BrowserWSURL — DevTools headless Chrome для теста игр; пусто — только статическая проверка.
 	BrowserWSURL       string
@@ -66,6 +70,7 @@ func Load() (Config, error) {
 		FallbackModels: envList("LLM_FALLBACK_MODELS"),
 		LLMMaxTokens:   envInt("LLM_MAX_TOKENS", defaultLLMMaxTokens),
 		MaxFixRounds:   envInt("MAX_FIX_ROUNDS", defaultMaxFixRounds),
+		Reasoning:      strings.ToLower(env("LLM_REASONING", defaultReasoning)),
 
 		BrowserWSURL:       env("BROWSER_WS_URL", ""),
 		BrowserTimeout:     time.Duration(envInt("BROWSER_TEST_TIMEOUT_SEC", defaultBrowserTimeoutSec)) * time.Second,
@@ -104,6 +109,11 @@ func (c Config) Validate() error {
 	}
 	if c.LLMMaxTokens < 1 {
 		return fmt.Errorf("LLM_MAX_TOKENS должен быть положительным, получено %d", c.LLMMaxTokens)
+	}
+	switch c.Reasoning {
+	case "off", "low", "medium", "high":
+	default:
+		return fmt.Errorf("LLM_REASONING: ожидается off, low, medium или high, получено %q", c.Reasoning)
 	}
 	if c.MaxFixRounds < 0 {
 		return fmt.Errorf("MAX_FIX_ROUNDS не может быть отрицательным, получено %d", c.MaxFixRounds)

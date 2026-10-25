@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
@@ -19,7 +20,22 @@ type Request struct {
 	Messages    []Msg
 	MaxTokens   int
 	Temperature float64
+	// Reasoning — бюджет скрытых рассуждений «думающих» моделей: ReasoningOff, low, medium, high.
+	// Пусто — как решит провайдер (у части моделей рассуждения съедают весь max_tokens).
+	Reasoning string
 }
+
+// Уровни Request.Reasoning.
+const (
+	ReasoningOff    = "off"
+	ReasoningLow    = "low"
+	ReasoningMedium = "medium"
+	ReasoningHigh   = "high"
+)
+
+// ErrEmptyTruncated — модель потратила весь лимит токенов (обычно на рассуждения)
+// и не написала ответа. Продолжение не поможет; помогает запрос с меньшими рассуждениями.
+var ErrEmptyTruncated = errors.New("ответ пуст: лимит токенов исчерпан до начала ответа")
 
 type Usage struct {
 	PromptTokens     int
