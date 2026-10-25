@@ -227,3 +227,15 @@ func TestEmptyTruncatedKeepsUsage(t *testing.T) {
 		t.Errorf("usage при пустом ответе потерян: %+v", resp)
 	}
 }
+
+func TestUsageReportsReasoningTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":900,"completion_tokens_details":{"reasoning_tokens":700}}}`)
+	}))
+	defer srv.Close()
+
+	resp, err := NewClient("k", "m", srv.URL, time.Second).Complete(context.Background(), Request{})
+	if err != nil || resp.Usage.ReasoningTokens != 700 || resp.Usage.CompletionTokens != 900 {
+		t.Fatalf("reasoning_tokens не разобран: %+v, %v", resp.Usage, err)
+	}
+}

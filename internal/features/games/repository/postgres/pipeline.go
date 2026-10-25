@@ -114,10 +114,10 @@ func (r *Repository) FinishGeneration(ctx context.Context, g domain.GenerationRe
 	if len(g.Calls) > 0 {
 		rows := make([][]any, 0, len(g.Calls))
 		for _, c := range g.Calls {
-			rows = append(rows, []any{g.ID, c.Role, c.Model, c.PromptTokens, c.CompletionTokens, c.CostUSD, c.LatencyMs, c.FinishReason, c.Error})
+			rows = append(rows, []any{g.ID, c.Role, c.Model, c.PromptTokens, c.CompletionTokens, c.ReasoningTokens, c.CostUSD, c.LatencyMs, c.FinishReason, c.Error})
 		}
 		_, err = tx.CopyFrom(ctx, pgx.Identifier{"llm_calls"},
-			[]string{"generation_id", "role", "model", "prompt_tokens", "completion_tokens", "cost_usd", "latency_ms", "finish_reason", "error"},
+			[]string{"generation_id", "role", "model", "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost_usd", "latency_ms", "finish_reason", "error"},
 			pgx.CopyFromRows(rows))
 		if err != nil {
 			return err
@@ -167,7 +167,7 @@ func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit i
 			ids[i], idx[g.ID] = g.ID, i
 		}
 		crows, err := r.pool.Query(ctx,
-			`SELECT generation_id, role, model, prompt_tokens, completion_tokens, cost_usd, latency_ms, finish_reason, error
+			`SELECT generation_id, role, model, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, latency_ms, finish_reason, error
 			 FROM llm_calls WHERE generation_id = ANY($1) ORDER BY id`, ids)
 		if err != nil {
 			return nil, err
@@ -176,8 +176,8 @@ func (r *Repository) ListGenerations(ctx context.Context, gameID string, limit i
 		for crows.Next() {
 			var gid int64
 			var c domain.LLMCall
-			if err := crows.Scan(&gid, &c.Role, &c.Model, &c.PromptTokens, &c.CompletionTokens, &c.CostUSD,
-				&c.LatencyMs, &c.FinishReason, &c.Error); err != nil {
+			if err := crows.Scan(&gid, &c.Role, &c.Model, &c.PromptTokens, &c.CompletionTokens, &c.ReasoningTokens,
+				&c.CostUSD, &c.LatencyMs, &c.FinishReason, &c.Error); err != nil {
 				return nil, err
 			}
 			out[idx[gid]].Calls = append(out[idx[gid]].Calls, c)

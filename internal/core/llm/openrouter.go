@@ -105,9 +105,12 @@ type chatResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int     `json:"prompt_tokens"`
-		CompletionTokens int     `json:"completion_tokens"`
-		Cost             float64 `json:"cost"`
+		PromptTokens            int     `json:"prompt_tokens"`
+		CompletionTokens        int     `json:"completion_tokens"`
+		Cost                    float64 `json:"cost"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -254,6 +257,9 @@ func parseChatResponse(status int, raw []byte) (Response, error) {
 			PromptTokens:     out.Usage.PromptTokens,
 			CompletionTokens: out.Usage.CompletionTokens,
 			CostUSD:          out.Usage.Cost,
+		}
+		if d := out.Usage.CompletionTokensDetails; d != nil {
+			r.Usage.ReasoningTokens = d.ReasoningTokens
 		}
 	}
 	if strings.TrimSpace(choice.Message.Content) == "" {

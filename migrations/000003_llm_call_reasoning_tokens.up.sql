@@ -1,0 +1,1 @@
+ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS reasoning_tokens INT NOT NULL DEFAULT 0;

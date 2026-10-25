@@ -38,15 +38,38 @@ const (
 var ErrEmptyTruncated = errors.New("ответ пуст: лимит токенов исчерпан до начала ответа")
 
 type Usage struct {
-	PromptTokens     int
+	PromptTokens int
+	// CompletionTokens включает ReasoningTokens: рассуждения оплачиваются как выход.
 	CompletionTokens int
+	ReasoningTokens  int
 	CostUSD          float64
 }
 
 func (u *Usage) Add(o Usage) {
 	u.PromptTokens += o.PromptTokens
 	u.CompletionTokens += o.CompletionTokens
+	u.ReasoningTokens += o.ReasoningTokens
 	u.CostUSD += o.CostUSD
+}
+
+// WithCallTimeout ограничивает каждый отдельный запрос к модели. Нужен для CompleteFull:
+// продолжению оборванного ответа полагается свой таймаут, а не остаток от первой части.
+func WithCallTimeout(p Provider, d time.Duration) Provider {
+	return timeoutProvider{p: p, d: d}
+}
+
+type timeoutProvider struct {
+	p Provider
+	d time.Duration
+}
+
+func (t timeoutProvider) Complete(ctx context.Context, req Request) (Response, error) {
+	if t.d <= 0 {
+		return t.p.Complete(ctx, req)
+	}
+	cctx, cancel := context.WithTimeout(ctx, t.d)
+	defer cancel()
+	return t.p.Complete(cctx, req)
 }
 
 type Response struct {

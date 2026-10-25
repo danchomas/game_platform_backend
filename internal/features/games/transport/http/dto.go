@@ -157,6 +157,7 @@ type llmCallDTO struct {
 	Model            string  `json:"model"`
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
+	ReasoningTokens  int     `json:"reasoning_tokens"`
 	CostUSD          float64 `json:"cost_usd"`
 	LatencyMs        int64   `json:"latency_ms"`
 	FinishReason     string  `json:"finish_reason"`

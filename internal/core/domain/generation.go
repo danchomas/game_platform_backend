@@ -84,10 +84,12 @@ type LLMCall struct {
 	Model            string
 	PromptTokens     int
 	CompletionTokens int
-	CostUSD          float64
-	LatencyMs        int64
-	FinishReason     string
-	Error            string
+	// ReasoningTokens — часть CompletionTokens, ушедшая на скрытые рассуждения модели.
+	ReasoningTokens int
+	CostUSD         float64
+	LatencyMs       int64
+	FinishReason    string
+	Error           string
 }
 
 // Generation — один запуск агента (план, сборка или правка) со всей телеметрией.

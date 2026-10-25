@@ -107,10 +107,8 @@ func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, te
 }
 
 func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, tr *Trace) (string, error) {
-	cctx, cancel := context.WithTimeout(ctx, a.cfg.CallTimeout)
-	defer cancel()
-
-	resp, err := llm.CompleteFull(cctx, a.llm, llm.Request{
+	// LLM_TIMEOUT_SEC — на каждый запрос: продолжение длинного ответа получает свой таймаут
+	resp, err := llm.CompleteFull(ctx, llm.WithCallTimeout(a.llm, a.cfg.CallTimeout), llm.Request{
 		Model:       model,
 		Fallbacks:   a.cfg.Models.Fallbacks,
 		Messages:    msgs,
@@ -124,6 +122,7 @@ func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg
 		Model:            model,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
+		ReasoningTokens:  resp.Usage.ReasoningTokens,
 		CostUSD:          resp.Usage.CostUSD,
 		LatencyMs:        resp.Latency.Milliseconds(),
 		FinishReason:     resp.FinishReason,
