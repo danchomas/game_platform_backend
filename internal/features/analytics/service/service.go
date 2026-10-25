@@ -1,37 +1,42 @@
 package service
 
 import (
-	"context"
 	"sync"
 	"time"
-
-	"beeline-games/internal/core/domain"
-	"beeline-games/internal/features/analytics/repository/postgres"
 )
 
-type DashboardData struct {
-	Scope		string			`json:"scope"`
-	Days		int			`json:"days"`
-	Summary		domain.Summary		`json:"summary"`
-	Daily		[]domain.DayPoint	`json:"daily"`
-	Games		[]domain.GameRow	`json:"games,omitempty"`
-	CustomEvents	[]domain.EventCount	`json:"custom_events"`
-	SessionDuration	[]domain.Bucket		`json:"session_duration"`
+const (
+	defaultDays = 30
+	minDays     = 1
+	maxDays     = 365
+
+	hintTTL = 5 * time.Minute
+
+	hintGames = 3
+)
+
+type Service struct {
+	repo  StatsRepository
+	games GameOwnership
+
+	hintMu  sync.Mutex
+	hint    string
+	hintExp time.Time
 }
 
-type Service interface {
-	GetOverview(ctx context.Context, userID, role, scope string, days int) (DashboardData, error)
-	GetGameAnalytics(ctx context.Context, userID, role, gameID string, days int) (DashboardData, error)
-	GetInsightsHint(ctx context.Context) string
+func NewService(repo StatsRepository, games GameOwnership) *Service {
+	return &Service{repo: repo, games: games}
 }
 
-type service struct {
-	repo	postgres.Repository
-	hintMu	sync.Mutex
-	hint	string
-	hintExp	time.Time
-}
-
-func NewService(repo postgres.Repository) Service {
-	return &service{repo: repo}
+func clampDays(days int) int {
+	switch {
+	case days <= 0:
+		return defaultDays
+	case days < minDays:
+		return minDays
+	case days > maxDays:
+		return maxDays
+	default:
+		return days
+	}
 }

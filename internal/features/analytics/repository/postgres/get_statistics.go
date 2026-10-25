@@ -30,7 +30,7 @@ func scanAgg(sc interface{ Scan(...any) error }, pre ...any) (domain.Summary, er
 	return m, err
 }
 
-func (r *repository) Summary(ctx context.Context, f domain.Filter) (domain.Summary, error) {
+func (r *Repository) Summary(ctx context.Context, f domain.Filter) (domain.Summary, error) {
 	m, err := scanAgg(r.pool.QueryRow(ctx,
 		`SELECT `+aggCols+` FROM events e JOIN games g ON g.id=e.game_id WHERE `+scope,
 		f.From, f.To, ns(f.OwnerID), ns(f.GameID)))
@@ -47,7 +47,7 @@ func (r *repository) Summary(ctx context.Context, f domain.Filter) (domain.Summa
 	return m, err
 }
 
-func (r *repository) Daily(ctx context.Context, f domain.Filter) ([]domain.DayPoint, error) {
+func (r *Repository) Daily(ctx context.Context, f domain.Filter) ([]domain.DayPoint, error) {
 	rows, err := r.pool.Query(ctx, `
 	  WITH days AS (
 	    SELECT generate_series(date_trunc('day',$1::timestamptz), date_trunc('day',$2::timestamptz - interval '1 microsecond'), interval '1 day') AS d),
@@ -77,7 +77,7 @@ func (r *repository) Daily(ctx context.Context, f domain.Filter) ([]domain.DayPo
 	return out, rows.Err()
 }
 
-func (r *repository) PerGame(ctx context.Context, f domain.Filter) ([]domain.GameRow, error) {
+func (r *Repository) PerGame(ctx context.Context, f domain.Filter) ([]domain.GameRow, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT g.id,g.title,g.genre,g.published,g.plays,`+aggCols+`
 		 FROM games g LEFT JOIN events e ON e.game_id=g.id AND e.ts>=$1 AND e.ts<$2
@@ -102,7 +102,7 @@ func (r *repository) PerGame(ctx context.Context, f domain.Filter) ([]domain.Gam
 	return out, rows.Err()
 }
 
-func (r *repository) CustomEvents(ctx context.Context, f domain.Filter) ([]domain.EventCount, error) {
+func (r *Repository) CustomEvents(ctx context.Context, f domain.Filter) ([]domain.EventCount, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT e.type, count(*), count(DISTINCT e.session_id)
 		 FROM events e JOIN games g ON g.id=e.game_id
@@ -125,7 +125,7 @@ func (r *repository) CustomEvents(ctx context.Context, f domain.Filter) ([]domai
 	return out, rows.Err()
 }
 
-func (r *repository) DurationBuckets(ctx context.Context, f domain.Filter) ([]domain.Bucket, error) {
+func (r *Repository) DurationBuckets(ctx context.Context, f domain.Filter) ([]domain.Bucket, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT CASE WHEN e.duration_ms < 10000 THEN '0-10s'
 		             WHEN e.duration_ms < 30000 THEN '10-30s'
@@ -154,7 +154,7 @@ func (r *repository) DurationBuckets(ctx context.Context, f domain.Filter) ([]do
 	return out, rows.Err()
 }
 
-func (r *repository) TopInsights(ctx context.Context, limit int) ([]domain.Insight, error) {
+func (r *Repository) TopInsights(ctx context.Context, limit int) ([]domain.Insight, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT g.title,g.genre,g.audience,`+aggCols+`
 		 FROM games g JOIN events e ON e.game_id=g.id
