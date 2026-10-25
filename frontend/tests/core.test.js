@@ -73,6 +73,17 @@ test('preview blocks network and forms even when generated HTML omits head', () 
     assert.match(result, /studio-preview/);
   }
 });
+test('preview emulates a phone before the game code runs', () => {
+  const result = previewHTML(
+    '<!doctype html><html><head><script data-gamekit="1">kit()</script></head><body><script>run();</script></body></html>',
+  );
+  const emulation = result.indexOf('maxTouchPoints');
+  assert.ok(emulation > 0 && emulation < result.indexOf('data-gamekit'));
+  assert.match(result, /pointer\\s\*:\\s\*coarse/);
+  assert.match(result, /new TouchEvent/);
+  assert.match(result, /'keydown','keyup','keypress'/);
+  assert.match(result, /user-select:none/);
+});
 test('all four demo exports are self-contained with valid scripts and SDK hooks', () => {
   for (const game of DEMO_GAMES) {
     const html = demoHTML(game);

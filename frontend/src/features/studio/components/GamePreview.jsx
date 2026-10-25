@@ -5,6 +5,7 @@ import { previewHTML } from '../previewHTML';
 import { describeProgress } from '../../games/pipelineStatus';
 import { useNow } from '../hooks/useNow';
 import { PreviewToolbar } from './PreviewToolbar';
+import { PhoneFrame, phoneScreen } from './PhoneFrame';
 import { PreviewFooter } from './PreviewFooter';
 import { GameSettings } from './GameSettings';
 import { VersionHistory } from './VersionHistory';
@@ -29,6 +30,8 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
   const [reload, setReload] = useState(0);
   const [panel, setPanel] = useState('');
   const [expanded, setExpanded] = useState(false);
+  const [orientation, setOrientation] = useState('portrait');
+  const screen = phoneScreen(orientation);
   const safeHTML = useMemo(() => previewHTML(html || ''), [html]);
   useEffect(() => {
     setView('preview');
@@ -52,11 +55,15 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
         expanded={expanded}
         setExpanded={setExpanded}
         onReload={() => setReload((value) => value + 1)}
+        orientation={orientation}
+        onRotate={() =>
+          setOrientation((value) => (value === 'portrait' ? 'landscape' : 'portrait'))
+        }
       />
       <div className={`preview-stage ${view === 'code' ? 'code-stage' : ''}`}>
         {html ? (
           view === 'preview' ? (
-            <div className="iframe-shell">
+            <PhoneFrame orientation={orientation}>
               <iframe
                 key={`${game?.id}-${reload}`}
                 srcDoc={safeHTML}
@@ -65,7 +72,7 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
                 allow="autoplay"
                 data-preview="game"
               />
-            </div>
+            </PhoneFrame>
           ) : (
             <pre className="code-view" tabIndex={0}>
               <code>{html}</code>
@@ -106,7 +113,7 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
             : 'Готово к вашей идее'}
         </span>
         <span>
-          Адаптивный экран
+          Телефон · {screen.width}×{screen.height}
           <span className="info-divider" />{' '}
           {html
             ? `${new Blob([html]).size / 1024 < 1 ? '< 1' : Math.round(new Blob([html]).size / 1024)} КБ`
