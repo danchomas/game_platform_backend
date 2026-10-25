@@ -11,7 +11,7 @@ docker compose up --build
 BASE=http://localhost:8080 ./scripts/smoke.sh   # сквозная проверка, нужен живой ключ
 ```
 
-Compose поднимает четыре контейнера: `db` (PostgreSQL), `migrator` (golang-migrate накатывает `migrations/`), `api` (стартует только после успешных миграций) и `frontend` (nginx со статикой React/Vite, проксирует `/api/`, `/g/` и `/healthz` на `api`).
+Compose поднимает пять контейнеров: `db` (PostgreSQL), `migrator` (golang-migrate накатывает `migrations/`), `browser` (headless Chrome для автотеста игр), `api` (стартует только после успешных миграций) и `frontend` (nginx со статикой React/Vite, проксирует `/api/`, `/g/` и `/healthz` на `api`).
 
 Без Docker: `go run ./cmd/app` (нужны Postgres с применёнными миграциями и переменные из `.env`) и `npm run dev` в `./frontend`.
 
@@ -29,11 +29,18 @@ gofmt -l -w . && go vet ./...
 | `JWT_SECRET` | — (обязательна) | ключ подписи токенов |
 | `OPENROUTER_API_KEY` | пусто | ключ OpenRouter; без него платформа работает, но генерация отвечает 503 |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | **базовый** адрес OpenAI-совместимого API, `/chat/completions` дописывается сам; сюда же можно подставить локальный сервер (`http://ollama:11434/v1`) |
-| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.5` | любой id с openrouter.ai/models |
+| `OPENROUTER_MODEL` | `anthropic/claude-haiku-5.5` | модель-кодер (пишет и правит игру), любой id с openrouter.ai/models |
+| `LLM_PLANNER_MODEL` | `deepseek/deepseek-v4.1-flash` | модель-планировщик (план игры, дешёвая) |
+| `LLM_FIXER_MODEL` | = `OPENROUTER_MODEL` | модель, исправляющая игру по найденным ошибкам |
+| `LLM_FALLBACK_MODELS` | пусто | запасные модели через запятую (поле `models` OpenRouter) |
+| `LLM_MAX_TOKENS` | `32000` | лимит ответа; оборванный ответ агент просит продолжить |
+| `MAX_FIX_ROUNDS` | `2` | кругов «тест → исправление» на одну сборку |
+| `BROWSER_WS_URL` | пусто (в compose `ws://browser:9222`) | DevTools headless Chrome; пусто — только статическая проверка |
+| `BROWSER_TEST_TIMEOUT_SEC` / `BROWSER_MAX_PARALLEL` | `40` / `2` | таймаут и параллельность теста в браузере |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | внешний адрес: из него собираются ссылки на игру и адрес SDK |
 | `MANAGER_CODE` | пусто | код для регистрации менеджером; пусто — без проверки |
 | `MAX_CONCURRENT_GEN` | `8` | одновременных генераций на процесс |
-| `LLM_TIMEOUT_SEC` | `180` | таймаут одного обращения к модели |
+| `LLM_TIMEOUT_SEC` | `240` | таймаут одного обращения к модели |
 | `PORT` / `FRONTEND_PORT` | `8080` / `3000` | порты наружу в compose |
 
 Без `DATABASE_URL` или `JWT_SECRET` процесс не стартует и пишет, чего не хватает. При старте в лог пишутся `base_url`, `model` и `key_set`.
@@ -51,7 +58,10 @@ internal/core/
   apperr           sentinel-ошибки и ValidationError
   config           чтение и проверка окружения
   jwt              HS256 на stdlib
-  llm              клиент OpenRouter, системный промпт, разбор ответа
+  llm              клиент OpenRouter (Provider), промпты ролей агента, разбор ответа
+  agent            агентный конвейер: план → код → проверки → тест в браузере → исправление
+  agent/browser    тест игры в headless Chrome (chromedp)
+  gamekit          runtime-библиотека ввода, кнопок и звука; встраивается в каждую игру
   htmlguard        проверка HTML от модели перед сохранением
   collector        буфер событий → пакетная запись через COPY
   repository/postgres/pool/pgx
@@ -74,13 +84,16 @@ frontend/          студия, каталог и дашборд (React + Vite,
 - Запросы дашборда выполняются параллельно.
 - Узкое место — LLM: генерации идут под семафором `MAX_CONCURRENT_GEN` (ожидание слота до 20 с, иначе 503), на одну игру — одна генерация за раз (иначе 409).
 
-### Генерация
+### Генерация (агентный конвейер)
 
-1. Промпт 3–4000 символов, иначе `400`.
-2. Модель получает историю чата игры, текущий HTML и подсказку из аналитики.
-3. Ответ проходит `htmlguard`: размер 256 B … 2 MB, наличие разметки игры, никаких внешних `src=`/`href=`/`url(` — игра обязана быть самодостаточной.
-4. Непригодный ответ получает одну повторную попытку; сетевая ошибка — нет.
-5. Версия, сообщения и карточка игры сохраняются одной транзакцией. Неудачная первая генерация удаляет созданную карточку.
+1. `POST /api/games {prompt}` → **план** игры от дешёвой модели (жанр, жесты, размер интерфейса под аудиторию, длина раунда), статус `awaiting_approval`. План правится в чате (`POST /plan`) или присылается отредактированным в `POST /approve {spec}`.
+2. `POST /approve` → сборка в фоне (`202`), статусы `generating → validating → testing → fixing → ready | failed`. Ход — `GET /status` (опрос) или `GET /events` (SSE).
+3. Кодер пишет игру по плану. Управление — через **GameKit**: жесты (`tap/swipe/drag/hold/action`), экранные кнопки, звук и масштаб. Библиотека встраивается в HTML игры, игра остаётся одним файлом.
+4. Ответ проходит `htmlguard`, затем проверки агента (вызовы `GameSDK.start/end`, ввод, сеть, `alert`), затем **тест в headless Chrome**: мобильный экран, сеть заблокирована; агент тапает и свайпает, смотрит ошибки JS, старт раунда, цикл кадров и реакцию на ввод.
+5. Найденные проблемы уходят модели-исправителю (до `MAX_FIX_ROUNDS` кругов). Если проблемы остались, версия сохраняется со статусом `ready` и пояснением в `status_detail`.
+6. Правка в чате (`POST /messages`) проходит тот же цикл в фоне; неудачная правка оставляет рабочую версию.
+7. Каждый запуск пишется в `generations` / `llm_calls`: модели, токены, стоимость, задержки, круги исправления, найденные и исправленные проблемы, отчёт теста, скриншот. Сводка — `GET /api/generations/stats` (менеджер).
+8. Оборванный по лимиту токенов ответ агент просит продолжить; 429/5xx шлюза повторяются один раз. Генерации, оборванные перезапуском сервера, при старте помечаются прерванными.
 
 ### Доступ к модели
 
@@ -95,8 +108,8 @@ frontend/          студия, каталог и дашборд (React + Vite,
 ## Как это работает
 
 1. Пользователь регистрируется по имени → получает `token` (JWT) и `access_key` (код для входа с другого устройства).
-2. `POST /api/games {prompt}` → модель генерирует игру → она сохраняется под UUID как версия 1.
-3. Чат: `POST /api/games/{id}/messages {content}` — «сделай кнопки больше» → модель возвращает новую полную версию. Все версии хранятся целиком, откат создаёт новую версию из старого текста.
+2. `POST /api/games {prompt}` → план игры; после `POST /api/games/{id}/approve` агент собирает, проверяет и при необходимости исправляет игру — она сохраняется под UUID как версия 1.
+3. Чат: `POST /api/games/{id}/messages {content}` — «сделай кнопки больше» → агент в фоне выпускает новую полную версию. Все версии хранятся целиком, откат создаёт новую версию из старого текста.
 4. `publish` → игра появляется в галерее и доступна всем по `GET /g/{id}` (это и есть URL для WebView).
 5. При отдаче `/g/{id}` сервер вставляет `sdk.js` первым скриптом в `<head>`. Игра вызывает `GameSDK.start() / end(result, score) / event(name, data)`; SDK сам шлёт `session_start`, `engaged`, `session_end`, `js_error`.
 6. В системный промпт подмешиваются самые «залипательные» опубликованные игры за 30 дней (жанр, аудитория, длительность сессии, win rate), подсказка кэшируется на 5 минут.
@@ -120,11 +133,19 @@ https://<host>/g/<UUID>?uid=<идентификатор_пользователя
 | POST | `/api/auth/register` | `{name, role?: "player"\|"manager", manager_code?}` → `{user, token, access_key}` |
 | POST | `/api/auth/login` | `{access_key}` → `{user, token}` |
 | GET | `/api/me` | текущий пользователь |
-| POST | `/api/games` | `{prompt}` → `{game, reply, version}` (синхронно, ~20–90 с) |
+| POST | `/api/games` | `{prompt, auto_approve?}` → `{game, plan, reply}` (`201`; с `auto_approve` — `202` и сразу сборка) |
+| POST | `/api/games/{id}/plan` | `{content}` → правка плана до первой сборки |
+| POST | `/api/games/{id}/approve` | `{spec?}` → `202 {game}`, фоновая сборка |
+| GET | `/api/games/{id}/status` | статус конвейера и карточка игры (без html) |
+| GET | `/api/games/{id}/events` | SSE-поток смен статуса (`?token=` для EventSource) |
+| GET | `/api/games/{id}/generations` | история запусков агента: стоимость, проблемы, отчёт теста |
+| GET | `/api/games/{id}/preview.jpg` | скриншот из теста в браузере |
+| GET | `/api/generations/stats?days=30` | сводка генераций (менеджер): успешность, стоимость, частые проблемы, модели |
+| GET | `/api/benchmarks` | референсные значения метрик (сессия, retention, win rate) |
 | GET | `/api/games/mine` | мои игры |
 | GET | `/api/games/{id}` | игра с html (опубликованная — всем, черновик — владельцу) |
 | PATCH / DELETE | `/api/games/{id}` | `{title}` / удалить |
-| GET / POST | `/api/games/{id}/messages` | история чата / `{content}` → новая версия |
+| GET / POST | `/api/games/{id}/messages` | история чата / `{content}` → `202`, новая версия в фоне |
 | GET | `/api/games/{id}/versions` | список версий |
 | POST | `/api/games/{id}/versions/{v}/restore` | откат (создаёт новую версию) |
 | POST | `/api/games/{id}/publish` · `/unpublish` | опубликовать / снять |
@@ -144,5 +165,5 @@ https://<host>/g/<UUID>?uid=<идентификатор_пользователя
 - Правка опубликованной игры сразу меняет «живую» версию (кэш `/g/{id}` — 30 с).
 - Роль `manager` выдаётся при регистрации; в проде задайте `MANAGER_CODE`.
 - Нет rate-limit на `/api/events` и `/api/games` — для продакшена поставьте перед сервисом nginx/Cloudflare.
-- Генерация синхронная: `WriteTimeout` сервера = `LLM_TIMEOUT_SEC` + 30 с. Следующий шаг — SSE-стриминг ответа модели.
-- Тестами покрыты `core/jwt`, `core/llm`, `core/htmlguard` и сервисы `games`, `play`, `analytics`; транспорт, репозитории и фронтенд — пока нет.
+- Сборка и правки идут в фоне в процессе API; статусы для SSE раздаются из памяти процесса — при нескольких репликах нужен общий брокер.
+- Тестами покрыты `core/jwt`, `core/llm`, `core/htmlguard`, `core/agent`, `core/gamekit` и сервисы `games`, `play`, `analytics`; тест в браузере — интеграционный (`BROWSER_WS_URL=… go test ./internal/core/agent/browser/`); транспорт, репозитории и фронтенд — пока нет.

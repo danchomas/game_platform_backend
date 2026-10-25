@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Сквозной смоук-тест API: регистрация -> генерация -> итерация -> публикация -> игра -> события -> дашборд.
+# Сквозной смоук-тест API: регистрация -> план -> сборка -> итерация -> публикация -> игра -> события -> дашборд.
 # Использование: BASE=http://localhost:8080 ./scripts/smoke.sh   (нужен настроенный OPENROUTER_API_KEY)
 B=${BASE:-http://localhost:8080}
 j() { python3 -c "import sys,json; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$1"; }
@@ -9,15 +9,27 @@ TOK=$(echo "$R" | j "d['token']"); KEY=$(echo "$R" | j "d['access_key']")
 echo "== login by access_key"; curl -s -XPOST $B/api/auth/login -d "{\"access_key\":\"$KEY\"}" | j "d['user']['name']"
 A="Authorization: Bearer $TOK"
 
-echo "== create game"; G=$(curl -s -m 200 -XPOST $B/api/games -H "$A" -d '{"prompt":"замути змейку для бабушки"}')
-ID=$(echo "$G" | j "d['game']['id']"); echo "$G" | j "(d['reply'], d['version'], d['game']['title'], d['game']['play_url'])"
-echo "== iterate"; curl -s -m 200 -XPOST $B/api/games/$ID/messages -H "$A" -d '{"content":"сделай кнопки больше"}' | j "(d['reply'], 'v'+str(d['version']))"
+# ждёт окончания фоновой сборки и печатает итог
+wait_ready() {
+  for _ in $(seq 1 120); do
+    S=$(curl -s $B/api/games/$1/status -H "$A"); ST=$(echo "$S" | j "d['status']")
+    case "$ST" in ready|failed) echo "$S" | j "(d['status'], 'v'+str(d['version']), d.get('detail',''))"; return;; esac
+    sleep 2
+  done
+  echo "timeout"
+}
+
+echo "== plan"; G=$(curl -s -m 60 -XPOST $B/api/games -H "$A" -d '{"prompt":"замути змейку для бабушки"}')
+ID=$(echo "$G" | j "d['game']['id']"); echo "$G" | j "(d['game']['status'], d['plan']['controls'], d['reply'][:80])"
+echo "== approve -> background build"; curl -s -XPOST $B/api/games/$ID/approve -H "$A" | j "d['game']['status']"; wait_ready $ID
+echo "== generations"; curl -s $B/api/games/$ID/generations -H "$A" | j "[(g['kind'], g['status'], g['fix_rounds'], round(g['cost_usd'],4), [i['code'] for i in g['issues']]) for g in d]"
+echo "== iterate"; curl -s -XPOST $B/api/games/$ID/messages -H "$A" -d '{"content":"сделай кнопки больше"}' | j "d['game']['status']"; wait_ready $ID
 echo "== chat history"; curl -s $B/api/games/$ID/messages -H "$A" | j "[(m['role'],m['content'][:28]) for m in d]"
 echo "== versions"; curl -s $B/api/games/$ID/versions -H "$A" | j "[v['version'] for v in d]"
 echo "== draft hidden from anon (404)"; curl -s -o /dev/null -w "%{http_code}\n" $B/g/$ID
 echo "== draft preview by owner token (200)"; curl -s -o /dev/null -w "%{http_code}\n" "$B/g/$ID?token=$TOK"
 echo "== publish"; curl -s -XPOST $B/api/games/$ID/publish -H "$A" | j "d['published']"
-echo "== public play: SDK injected before game code"; curl -s $B/g/$ID | python3 -c "import sys; h=sys.stdin.read(); print('GameSDK' in h and h.index('gsdk_pid') < h.index('<canvas'))"
+echo "== public play: SDK injected before GameKit and game code"; curl -s $B/g/$ID | python3 -c "import sys; h=sys.stdin.read(); print('GameSDK' in h and h.index('gsdk_pid') < h.index('data-gamekit'))"
 
 echo "== player registers & plays (events)"
 P=$(curl -s -XPOST $B/api/auth/register -d '{"name":"Игрок"}'); PTOK=$(echo "$P" | j "d['token']")
