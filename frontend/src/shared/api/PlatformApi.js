@@ -99,6 +99,38 @@ export class PlatformApi {
       session_duration: data?.session_duration ?? [],
     };
   }
+  // Multigen: several variants of one request behind a single /e/{id} link.
+  listExperiments() {
+    return this.#httpClient.request('/api/experiments');
+  }
+  // Returns { experiment, variants } right away; variants are built in the background.
+  createExperiment(prompt, variants) {
+    return this.#post('/api/experiments', {
+      prompt,
+      variants,
+    });
+  }
+  getExperiment(experimentId) {
+    return this.#httpClient.request(this.#experimentPath(experimentId), {
+      timeout: 15_000,
+    });
+  }
+  launchExperiment(experimentId) {
+    return this.#post(`${this.#experimentPath(experimentId)}/launch`);
+  }
+  chooseWinner(experimentId, gameId) {
+    return this.#post(`${this.#experimentPath(experimentId)}/winner`, {
+      game_id: gameId,
+    });
+  }
+  getExperimentReport(experimentId) {
+    return this.#httpClient.request(`${this.#experimentPath(experimentId)}/report`, {
+      timeout: 15_000,
+    });
+  }
+  #experimentPath(experimentId) {
+    return `/api/experiments/${encodeURIComponent(experimentId)}`;
+  }
   #gamePath(gameId) {
     return `/api/games/${encodeURIComponent(gameId)}`;
   }

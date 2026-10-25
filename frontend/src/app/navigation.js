@@ -1,4 +1,4 @@
-import { Sparkles, LayoutGrid, ChartNoAxesCombined } from 'lucide-react';
+import { Sparkles, LayoutGrid, ChartNoAxesCombined, FlaskConical } from 'lucide-react';
 
 export const NAVIGATION = [
   {
@@ -10,6 +10,11 @@ export const NAVIGATION = [
     id: 'gallery',
     title: 'Мои игры',
     icon: LayoutGrid,
+  },
+  {
+    id: 'experiments',
+    title: 'Мультиген',
+    icon: FlaskConical,
   },
   {
     id: 'analytics',
