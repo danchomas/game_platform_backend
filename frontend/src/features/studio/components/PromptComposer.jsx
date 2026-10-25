@@ -4,7 +4,34 @@ import { Spinner } from '../../../shared/ui/Spinner';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { MAX_PROMPT_LENGTH } from '../generationPrompt';
 
-export function PromptComposer({ game, busy, demo, prompt, setPrompt, onGenerate, notify }) {
+const NEW_GAME_SUGGESTIONS = ['Змейка для бабушки', 'Пазл для детей', 'Кликер про космос'];
+const PLAN_SUGGESTIONS = ['Управление кнопками', 'Сделай темп спокойнее', 'Добавь уровни'];
+const EDIT_SUGGESTIONS = ['Сделай кнопки больше', 'Добавь уровни', 'Сделай темп спокойнее'];
+
+function getSuggestions(game, hasPlan) {
+  if (hasPlan) {
+    return PLAN_SUGGESTIONS;
+  }
+  return game ? EDIT_SUGGESTIONS : NEW_GAME_SUGGESTIONS;
+}
+
+function getPlaceholder(game, hasPlan) {
+  if (hasPlan) {
+    return 'Что поправить в плане?';
+  }
+  return game ? 'Что изменим в игре?' : 'Например, замути змейку для бабушки…';
+}
+
+export function PromptComposer({
+  game,
+  hasPlan,
+  busy,
+  demo,
+  prompt,
+  setPrompt,
+  onGenerate,
+  notify,
+}) {
   const [audience, setAudience] = useState('Для всех');
   const { recording, toggleRecording: handleVoiceInput } = useVoiceInput({
     onTranscript: (text) => setPrompt((previous) => [previous, text].filter(Boolean).join(' ')),
@@ -20,9 +47,7 @@ export function PromptComposer({ game, busy, demo, prompt, setPrompt, onGenerate
       setPrompt('');
     }
   }
-  const suggestions = game
-    ? ['Сделай кнопки больше', 'Добавь уровни', 'Сделай темп спокойнее']
-    : ['Змейка для бабушки', 'Пазл для детей', 'Кликер про космос'];
+  const suggestions = getSuggestions(game, hasPlan);
   return (
     <div className="composer-area">
       <div className="suggestion-list">
@@ -38,7 +63,7 @@ export function PromptComposer({ game, busy, demo, prompt, setPrompt, onGenerate
           aria-label="Запрос для ИИ"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder={game ? 'Что изменим в игре?' : 'Например, замути змейку для бабушки…'}
+          placeholder={getPlaceholder(game, hasPlan)}
           maxLength={MAX_PROMPT_LENGTH}
           disabled={busy}
           onKeyDown={(event) => {

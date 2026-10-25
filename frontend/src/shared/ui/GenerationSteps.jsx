@@ -1,12 +1,13 @@
 import { Check } from 'lucide-react';
 
-export function GenerationSteps({ busy }) {
+// steps: [{ label, state: 'done' | 'active' | 'pending' }] — the caller maps server stages to steps.
+export function GenerationSteps({ steps }) {
   return (
     <div className="gen-steps">
-      {['Понимаем вашу идею', 'Генерируем код игры', 'Готовим предпросмотр'].map((text) => (
-        <span key={text} className={busy ? 'processing' : ''}>
-          {busy ? <span className="step-dot" /> : <Check size={12} />}
-          <span>{text}</span>
+      {steps.map((step) => (
+        <span key={step.label} className={step.state}>
+          {step.state === 'done' ? <Check size={12} /> : <span className="step-dot" />}
+          <span>{step.label}</span>
         </span>
       ))}
     </div>

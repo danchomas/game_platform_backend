@@ -134,6 +134,55 @@
 .message-result > div {
   flex: 1;
 }
+.plan-card {
+  margin: 4px 0 14px 34px;
+  border: 1px solid #e9ecdd;
+  background: #fcfcf7;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 10px;
+  color: #6c7f56;
+}
+.plan-card-title {
+  font-weight: 500;
+}
+.plan-card-title small {
+  display: block;
+  font-size: 9px;
+  font-weight: 400;
+  color: #93a47e;
+  margin-top: 4px;
+}
+.plan-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 10px 0 12px;
+}
+.plan-facts dt {
+  font-size: 8px;
+  color: #a2ae8f;
+}
+.plan-facts dd {
+  margin: 2px 0 0;
+}
+.plan-approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 12px;
+  background: #f5d76e;
+  color: #4d4a2a;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.plan-approve:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .message-result small {
   display: block;
   font-size: 9px;
@@ -325,9 +374,15 @@
   border: 1px solid #b2c091;
   border-radius: 50%;
 }
-.gen-steps .processing:first-child .step-dot {
+.gen-steps .active {
+  color: #6f7d55;
+}
+.gen-steps .active .step-dot {
   background: #becb98;
   animation: pulse 1s infinite;
+}
+.gen-steps .done {
+  color: #93a47e;
 }
 .audience-select,
 .audience-select select {

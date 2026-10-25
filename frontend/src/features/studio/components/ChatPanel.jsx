@@ -52,9 +52,13 @@ export function ChatPanel({
         demo={demo}
         busy={editor.busy}
         generating={editor.generating}
+        stage={editor.stage}
+        plan={editor.plan}
+        onApprove={editor.approve}
       />
       <PromptComposer
         game={editor.game}
+        hasPlan={Boolean(editor.plan)}
         busy={editor.busy}
         demo={demo}
         prompt={prompt}
