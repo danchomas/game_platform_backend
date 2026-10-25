@@ -1,180 +1,168 @@
 package http
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
-	"strconv"
 
-	coreErrs "beeline-games/internal/core/errors"
 	"beeline-games/internal/core/transport/http/request"
 	"beeline-games/internal/core/transport/http/response"
 )
 
 func (h *Handler) GetGame(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	userID, _ := request.UserID(r)
-
-	g, err := h.svc.GetGame(r.Context(), userID, id)
+	gameID, err := request.PathID(r, "id")
 	if err != nil {
-		response.Error(w, http.StatusNotFound, "игра не найдена")
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toDTO(g, h.publicBaseURL))
+	userID, _ := request.UserID(r)
+
+	g, err := h.svc.GetGame(r.Context(), userID, gameID)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, h.toGameDTO(g))
 }
 
 func (h *Handler) MyGames(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	limit := qInt(r, "limit", 50, 1, 200)
-	offset := qInt(r, "offset", 0, 0, 1<<20)
-
-	gs, err := h.svc.GetMyGames(r.Context(), userID, limit, offset)
+	userID, err := request.RequireUserID(r)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "внутренняя ошибка")
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toDTOs(gs, h.publicBaseURL))
+
+	gs, err := h.svc.GetMyGames(r.Context(), userID, request.Int(r, "limit", 0), request.Int(r, "offset", 0))
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, h.toGameDTOs(gs))
 }
 
 func (h *Handler) Gallery(w http.ResponseWriter, r *http.Request) {
-	sort := r.URL.Query().Get("sort")
-	q := r.URL.Query().Get("q")
-	limit := qInt(r, "limit", 24, 1, 100)
-	offset := qInt(r, "offset", 0, 0, 1<<20)
-
-	gs, err := h.svc.GetGallery(r.Context(), sort, q, limit, offset)
+	gs, err := h.svc.GetGallery(r.Context(),
+		request.Str(r, "sort"), request.Str(r, "q"),
+		request.Int(r, "limit", 0), request.Int(r, "offset", 0))
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "внутренняя ошибка")
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toDTOs(gs, h.publicBaseURL))
+
+	response.JSON(w, http.StatusOK, h.toGameDTOs(gs))
 }
 
 func (h *Handler) PatchGame(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	var in struct {
-		Title string `json:"title"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		response.Error(w, http.StatusBadRequest, "некорректный JSON")
-		return
-	}
-
-	g, err := h.svc.PatchGame(r.Context(), userID, id, in.Title)
+	userID, gameID, err := h.callerAndGame(r)
 	if err != nil {
-		handleCRUDErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toDTO(g, h.publicBaseURL))
+
+	var in patchRequest
+	if err := request.Decode(r, &in); err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	g, err := h.svc.PatchGame(r.Context(), userID, gameID, in.Title)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, h.toGameDTO(g))
 }
 
 func (h *Handler) DeleteGame(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	if err := h.svc.DeleteGame(r.Context(), userID, id); err != nil {
-		handleCRUDErr(w, err)
+	userID, gameID, err := h.callerAndGame(r)
+	if err != nil {
+		response.Error(w, r, err)
 		return
 	}
+
+	if err := h.svc.DeleteGame(r.Context(), userID, gameID); err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
 	response.NoContent(w)
 }
 
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
-	h.setPublishStatus(w, r, true)
+	h.setPublished(w, r, true)
 }
 
 func (h *Handler) Unpublish(w http.ResponseWriter, r *http.Request) {
-	h.setPublishStatus(w, r, false)
+	h.setPublished(w, r, false)
 }
 
-func (h *Handler) setPublishStatus(w http.ResponseWriter, r *http.Request, status bool) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	g, err := h.svc.PublishGame(r.Context(), userID, id, status)
+func (h *Handler) setPublished(w http.ResponseWriter, r *http.Request, publish bool) {
+	userID, gameID, err := h.callerAndGame(r)
 	if err != nil {
-		if errors.Is(err, coreErrs.ErrInvalidInput) {
-			response.Error(w, http.StatusBadRequest, "в игре ещё нет сгенерированного кода")
-			return
-		}
-		handleCRUDErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toDTO(g, h.publicBaseURL))
+
+	g, err := h.svc.PublishGame(r.Context(), userID, gameID, publish)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, h.toGameDTO(g))
 }
 
 func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	msgs, err := h.svc.GetMessages(r.Context(), userID, id)
+	userID, gameID, err := h.callerAndGame(r)
 	if err != nil {
-		handleCRUDErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, msgs)
+
+	msgs, err := h.svc.GetMessages(r.Context(), userID, gameID)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, toMessageDTOs(msgs))
 }
 
 func (h *Handler) Versions(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	vs, err := h.svc.GetVersions(r.Context(), userID, id)
+	userID, gameID, err := h.callerAndGame(r)
 	if err != nil {
-		handleCRUDErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, vs)
+
+	vs, err := h.svc.GetVersions(r.Context(), userID, gameID)
+	if err != nil {
+		response.Error(w, r, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, toVersionDTOs(vs))
 }
 
 func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
-	userID, _ := request.UserID(r)
-	id := r.PathValue("id")
-
-	ver, err := strconv.Atoi(r.PathValue("v"))
+	userID, gameID, err := h.callerAndGame(r)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "некорректная версия")
+		response.Error(w, r, err)
 		return
 	}
 
-	game, reply, version, err := h.svc.RestoreVersion(r.Context(), userID, id, ver)
+	version, err := request.PathInt(r, "v")
 	if err != nil {
-		handleCRUDErr(w, err)
+		response.Error(w, r, err)
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]any{
-		"game":		toDTO(game, h.publicBaseURL),
-		"reply":	reply,
-		"version":	version,
-	})
-}
-
-func handleCRUDErr(w http.ResponseWriter, err error) {
-	if errors.Is(err, coreErrs.ErrNotFound) {
-		response.Error(w, http.StatusNotFound, "не найдено")
-	} else if errors.Is(err, coreErrs.ErrForbidden) {
-		response.Error(w, http.StatusForbidden, "нет доступа")
-	} else if errors.Is(err, coreErrs.ErrInvalidInput) {
-		response.Error(w, http.StatusBadRequest, "некорректные данные")
-	} else {
-		response.Error(w, http.StatusInternalServerError, "внутренняя ошибка")
-	}
-}
-
-func qInt(r *http.Request, key string, def, min, max int) int {
-	n, err := strconv.Atoi(r.URL.Query().Get(key))
+	game, reply, newVersion, err := h.svc.RestoreVersion(r.Context(), userID, gameID, version)
 	if err != nil {
-		return def
+		response.Error(w, r, err)
+		return
 	}
-	if n < min {
-		return min
-	}
-	if n > max {
-		return max
-	}
-	return n
+
+	response.JSON(w, http.StatusOK, h.toGenerationDTO(game, reply, newVersion))
 }

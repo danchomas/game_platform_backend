@@ -2,18 +2,18 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
-	coreErrs "beeline-games/internal/core/errors"
-	"beeline-games/internal/features/games/repository/postgres"
 )
 
-func (s *service) CreateAndGenerate(ctx context.Context, ownerID, prompt string) (domain.Game, string, int, error) {
-	prompt = strings.TrimSpace(prompt)
-	if n := utf8.RuneCountInString(prompt); n < 3 || n > 4000 {
-		return domain.Game{}, "", 0, coreErrs.ErrInvalidInput
+func (s *Service) CreateAndGenerate(ctx context.Context, ownerID, prompt string) (domain.Game, string, int, error) {
+	prompt, err := validatePrompt(prompt)
+	if err != nil {
+		return domain.Game{}, "", 0, err
 	}
 
 	id, err := s.repo.CreateGame(ctx, ownerID, prompt)
@@ -21,51 +21,65 @@ func (s *service) CreateAndGenerate(ctx context.Context, ownerID, prompt string)
 		return domain.Game{}, "", 0, err
 	}
 
-	s.inflight.Store(id, true)
+	s.inflight.Store(id, struct{}{})
 	defer s.inflight.Delete(id)
 
-	v, err := s.generate(ctx, domain.Game{ID: id}, prompt)
+	version, err := s.generate(ctx, domain.Game{ID: id}, prompt)
 	if err != nil {
-		_ = s.repo.DeleteGame(context.WithoutCancel(ctx), id)
+		if delErr := s.repo.DeleteGame(context.WithoutCancel(ctx), id); delErr != nil {
+			return domain.Game{}, "", 0, fmt.Errorf("%w (карточка не удалена: %v)", wrapLLMErr(err), delErr)
+		}
+		return domain.Game{}, "", 0, wrapLLMErr(err)
+	}
+
+	return s.loadAfterGeneration(ctx, id, version)
+}
+
+func (s *Service) IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, string, int, error) {
+	instruction, err := validatePrompt(instruction)
+	if err != nil {
 		return domain.Game{}, "", 0, err
 	}
 
-	g, err := s.repo.GetGame(ctx, id)
-	return g, getLatestReply(ctx, s.repo, id), v, err
-}
-
-func (s *service) IterateGame(ctx context.Context, userID, gameID, instruction string) (domain.Game, string, int, error) {
-	instruction = strings.TrimSpace(instruction)
-	if n := utf8.RuneCountInString(instruction); n < 3 || n > 4000 {
-		return domain.Game{}, "", 0, coreErrs.ErrInvalidInput
+	g, err := s.getOwnedGame(ctx, userID, gameID)
+	if err != nil {
+		return domain.Game{}, "", 0, err
 	}
 
+	if _, busy := s.inflight.LoadOrStore(g.ID, struct{}{}); busy {
+		return domain.Game{}, "", 0, apperr.ErrConflict
+	}
+	defer s.inflight.Delete(g.ID)
+
+	version, err := s.generate(ctx, g, instruction)
+	if err != nil {
+		return domain.Game{}, "", 0, wrapLLMErr(err)
+	}
+
+	return s.loadAfterGeneration(ctx, gameID, version)
+}
+
+func (s *Service) loadAfterGeneration(ctx context.Context, gameID string, version int) (domain.Game, string, int, error) {
 	g, err := s.repo.GetGame(ctx, gameID)
 	if err != nil {
 		return domain.Game{}, "", 0, err
 	}
-	if g.OwnerID != userID {
-		return domain.Game{}, "", 0, coreErrs.ErrForbidden
-	}
-
-	if _, busy := s.inflight.LoadOrStore(g.ID, true); busy {
-		return domain.Game{}, "", 0, coreErrs.ErrForbidden
-	}
-	defer s.inflight.Delete(g.ID)
-
-	v, err := s.generate(ctx, g, instruction)
-	if err != nil {
-		return domain.Game{}, "", 0, err
-	}
-
-	updatedGame, err := s.repo.GetGame(ctx, gameID)
-	return updatedGame, getLatestReply(ctx, s.repo, gameID), v, err
+	return g, s.latestReply(ctx, gameID), version, nil
 }
 
-func getLatestReply(ctx context.Context, repo postgres.Repository, gameID string) string {
-	msgs, err := repo.Messages(ctx, gameID)
+func (s *Service) latestReply(ctx context.Context, gameID string) string {
+	msgs, err := s.repo.Messages(ctx, gameID)
 	if err != nil || len(msgs) == 0 {
 		return ""
 	}
 	return msgs[len(msgs)-1].Content
+}
+
+func validatePrompt(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if n := utf8.RuneCountInString(text); n < minPromptLen || n > maxPromptLen {
+		return "", apperr.NewValidationError("prompt",
+			fmt.Sprintf("текст: от %d до %d символов", minPromptLen, maxPromptLen))
+	}
+	return text, nil
 }
