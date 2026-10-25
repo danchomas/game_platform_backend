@@ -23,6 +23,9 @@ type Request struct {
 	// Reasoning — бюджет скрытых рассуждений «думающих» моделей: ReasoningOff, low, medium, high.
 	// Пусто — как решит провайдер (у части моделей рассуждения съедают весь max_tokens).
 	Reasoning string
+	// OnDelta != nil — ответ запрашивается потоком, каждый кусок текста приходит сюда по мере
+	// написания (прогресс сборки). Итоговый Response тот же, что и без потока.
+	OnDelta func(text string)
 }
 
 // Уровни Request.Reasoning.

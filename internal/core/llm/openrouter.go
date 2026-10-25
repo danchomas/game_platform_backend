@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -81,6 +82,7 @@ type chatRequest struct {
 	Temperature float64        `json:"temperature"`
 	Usage       map[string]any `json:"usage,omitempty"`
 	Reasoning   map[string]any `json:"reasoning,omitempty"`
+	Stream      bool           `json:"stream,omitempty"`
 }
 
 // reasoningParam — параметр reasoning OpenRouter. Текст рассуждений не запрашиваем (exclude):
@@ -102,20 +104,37 @@ type chatResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		// Delta — кусок ответа в потоковом режиме
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens            int     `json:"prompt_tokens"`
-		CompletionTokens        int     `json:"completion_tokens"`
-		Cost                    float64 `json:"cost"`
-		CompletionTokensDetails *struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	} `json:"usage"`
+	Usage *chatUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Code    any    `json:"code"`
 	} `json:"error"`
+}
+
+type chatUsage struct {
+	PromptTokens            int     `json:"prompt_tokens"`
+	CompletionTokens        int     `json:"completion_tokens"`
+	Cost                    float64 `json:"cost"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+func (u *chatUsage) toUsage() Usage {
+	if u == nil {
+		return Usage{}
+	}
+	out := Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CostUSD: u.Cost}
+	if d := u.CompletionTokensDetails; d != nil {
+		out.ReasoningTokens = d.ReasoningTokens
+	}
+	return out
 }
 
 // Chat — простой вызов модели клиента по умолчанию.
@@ -149,6 +168,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 		Temperature: req.Temperature,
 		Usage:       map[string]any{"include": true},
 		Reasoning:   reasoningParam(req.Reasoning),
+		Stream:      req.OnDelta != nil,
 	}
 	if len(req.Fallbacks) > 0 {
 		payload.Models = append([]string{model}, req.Fallbacks...)
@@ -167,7 +187,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 			case <-time.After(time.Duration(attempt) * retryDelay):
 			}
 		}
-		resp, err := c.do(ctx, body)
+		resp, err := c.do(ctx, body, req.OnDelta)
 		if err == nil {
 			if resp.Model == "" {
 				resp.Model = model
@@ -187,7 +207,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 	return Response{}, lastErr
 }
 
-func (c *Client) do(ctx context.Context, body []byte) (Response, error) {
+func (c *Client) do(ctx context.Context, body []byte, onDelta func(string)) (Response, error) {
 	start := time.Now()
 	endpoint := c.baseURL + chatPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -208,6 +228,13 @@ func (c *Client) do(ctx context.Context, body []byte) (Response, error) {
 		return Response{}, fmt.Errorf("%w: запрос к %s не прошёл: %v", apperr.ErrLLMUnavailable, c.baseURL, err)
 	}
 	defer resp.Body.Close()
+
+	// ошибки шлюза приходят обычным JSON и в потоковом режиме
+	if onDelta != nil && resp.StatusCode == http.StatusOK {
+		out, err := readStream(resp.Body, onDelta)
+		out.Latency = time.Since(start)
+		return out, err
+	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
@@ -251,26 +278,74 @@ func parseChatResponse(status int, raw []byte) (Response, error) {
 	}
 
 	choice := out.Choices[0]
-	r := Response{Text: choice.Message.Content, Model: out.Model, FinishReason: choice.FinishReason}
-	if out.Usage != nil {
-		r.Usage = Usage{
-			PromptTokens:     out.Usage.PromptTokens,
-			CompletionTokens: out.Usage.CompletionTokens,
-			CostUSD:          out.Usage.Cost,
+	r := Response{Text: choice.Message.Content, Model: out.Model, FinishReason: choice.FinishReason, Usage: out.Usage.toUsage()}
+	return r, checkEmpty(r)
+}
+
+func checkEmpty(r Response) error {
+	if strings.TrimSpace(r.Text) != "" {
+		return nil
+	}
+	err := fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)", apperr.ErrLLMFailed, r.FinishReason)
+	if r.Truncated() {
+		err = fmt.Errorf("%w: %w", err, ErrEmptyTruncated)
+	}
+	return err
+}
+
+// readStream читает SSE-поток chat/completions: куски ответа отдаёт в onDelta,
+// usage и finish_reason берёт из последних событий.
+func readStream(body io.Reader, onDelta func(string)) (Response, error) {
+	var r Response
+	var text strings.Builder
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		// пустые строки разделяют события, строки с ':' — комментарии (OpenRouter шлёт «PROCESSING»)
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
 		}
-		if d := out.Usage.CompletionTokensDetails; d != nil {
-			r.Usage.ReasoningTokens = d.ReasoningTokens
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+		var ev chatResponse
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue
+		}
+		if ev.Error != nil {
+			// посреди потока: часть ответа уже показана, повтор задвоил бы прогресс — не повторяем
+			r.Text = text.String()
+			return r, fmt.Errorf("%w: ошибка в потоке ответа: %s", apperr.ErrLLMUnavailable, ev.Error.Message)
+		}
+		if ev.Model != "" {
+			r.Model = ev.Model
+		}
+		if ev.Usage != nil {
+			r.Usage = ev.Usage.toUsage()
+		}
+		if len(ev.Choices) == 0 {
+			continue
+		}
+		ch := ev.Choices[0]
+		if ch.FinishReason != "" {
+			r.FinishReason = ch.FinishReason
+		}
+		if d := ch.Delta.Content; d != "" {
+			if text.Len()+len(d) > maxResponseBytes {
+				return r, fmt.Errorf("%w: ответ модели больше %d байт", apperr.ErrLLMFailed, maxResponseBytes)
+			}
+			text.WriteString(d)
+			onDelta(d)
 		}
 	}
-	if strings.TrimSpace(choice.Message.Content) == "" {
-		err := fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
-			apperr.ErrLLMFailed, choice.FinishReason)
-		if r.Truncated() {
-			err = fmt.Errorf("%w: %w", err, ErrEmptyTruncated)
-		}
-		return r, err
+	r.Text = text.String()
+	if err := sc.Err(); err != nil {
+		return r, fmt.Errorf("%w: ответ модели не дочитан: %v", apperr.ErrLLMUnavailable, err)
 	}
-	return r, nil
+	return r, checkEmpty(r)
 }
 
 func snippet(b []byte) string {
