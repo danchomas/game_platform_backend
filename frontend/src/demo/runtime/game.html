@@ -1,0 +1,43 @@
+<div id="app">
+  <div class="stamp">МАЛЕНЬКАЯ<br />ИГРА.<br />БОЛЬШОЙ КАЙФ.</div>
+  <div class="cover" id="cover">
+    <div class="eyebrow">немного игры в вашем дне</div>
+    <svg class="snake-art" viewBox="0 0 200 110" fill="none">
+      <path
+        d="M30 84H117Q145 84 145 60V48Q145 26 120 26H82Q62 26 62 46Q62 63 83 63H113"
+        stroke="#45533b"
+        stroke-width="22"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle cx="107" cy="59" r="2.5" fill="#f9efbc" />
+      <path d="M127 64h13m-2-4 5 4-5 4" stroke="#cba832" stroke-width="2" />
+      <circle cx="175" cy="64" r="10" fill="#e6b843" />
+      <path d="m175 53 2-7" stroke="#586440" stroke-width="2" />
+    </svg>
+    <h1 id="title"></h1>
+    <p class="sub" id="intro"></p>
+    <button class="go" id="start">Начать играть <span>↗</span></button>
+  </div>
+  <div class="corner">GAME STUDIO / 01</div>
+  <div class="corner right">СОЗДАНО ДЛЯ ХОРОШЕГО НАСТРОЕНИЯ</div>
+  <div class="game" id="game">
+    <div class="hud">
+      <span id="score">Счёт: 0</span><span id="goal"></span><button id="pause">Пауза Ⅱ</button>
+    </div>
+    <div class="board" id="board"></div>
+    <div id="controls" class="controls">
+      <button data-dir="left" aria-label="Влево">←</button
+      ><button data-dir="up" aria-label="Вверх">↑</button
+      ><button data-dir="down" aria-label="Вниз">↓</button
+      ><button data-dir="right" aria-label="Вправо">→</button>
+    </div>
+    <p class="hint" id="hint">Стрелки на клавиатуре, кнопки или свайп</p>
+  </div>
+  <div class="end" id="end">
+    <div class="result-icon" id="result-icon">☀</div>
+    <h2 id="result"></h2>
+    <p id="final"></p>
+    <button class="go" id="restart">Ещё раз ↗</button>
+  </div>
+</div>

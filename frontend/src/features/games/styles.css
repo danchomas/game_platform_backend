@@ -1,0 +1,585 @@
+/* Game collection: search, cards and menus. */
+.gallery-page .page-heading {
+  margin-bottom: 32px;
+}
+.gallery-page .page-heading > .button {
+  margin-right: 1px;
+}
+.gallery-collection {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 21px;
+}
+.gallery-collection > button {
+  font-size: 12px;
+  color: #9aa889;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px 15px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.gallery-collection > button.active {
+  border-bottom-color: #c4b357;
+  color: #70815b;
+}
+.gallery-collection > button > span {
+  font-size: 8px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #f0f3e6;
+  color: #9aab82;
+}
+.gallery-collection > .demo-label {
+  margin-left: auto;
+  margin-bottom: 12px;
+}
+.gallery-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+.filter-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+.filter-tabs > button {
+  font-size: 10px;
+  padding: 7px 11px;
+  border-radius: 5px;
+  color: #9eac8d;
+}
+.filter-tabs > button.active {
+  background: #ebeedf;
+  color: #7c8d64;
+}
+.filter-tabs > button:hover {
+  background: #f0f3e7;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e4ead7;
+  border-radius: 6px;
+  padding: 8px 11px;
+  background: white;
+  color: #a7b597;
+  width: 180px;
+}
+.search input {
+  border: 0;
+  outline: none;
+  min-width: 0;
+  width: 100%;
+  font-size: 10px;
+  color: #91a17c;
+}
+.search input:focus-visible {
+  outline: none;
+}
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 21px;
+}
+.game-card {
+  border: 1px solid #e6eadb;
+  border-radius: 12px;
+  background: white;
+  overflow: visible;
+  position: relative;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.game-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 7px 20px #4e60120a;
+}
+.game-card-art {
+  width: 100%;
+  padding: 0;
+  position: relative;
+  display: block;
+  border-radius: 11px 11px 0 0;
+  overflow: hidden;
+}
+.game-art {
+  height: 209px;
+  background: #f7e98a;
+  position: relative;
+  overflow: hidden;
+}
+.game-art > svg {
+  height: 100%;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+  padding: 11px;
+  transition: transform 0.4s;
+}
+.game-card-art:hover .game-art > svg {
+  transform: scale(1.04) rotate(-2deg);
+}
+.art-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.3;
+  background-image: radial-gradient(#51523c 0.45px, transparent 0.45px);
+  background-size: 4px 4px;
+}
+.game-art.catch {
+  background: #e7dff3;
+}
+.game-art.memory {
+  background: #dce8d8;
+}
+.game-art.click {
+  background: #f5dbc6;
+}
+.art-corner {
+  position: absolute;
+  right: 17px;
+  top: 10px;
+  font-size: 19px;
+  color: #3b3f2a77;
+  z-index: 2;
+}
+.art-edition {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  font-size: 6px;
+  letter-spacing: 1.2px;
+  opacity: 0.45;
+  color: #455037;
+}
+.art-genre {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  font-size: 8px;
+  color: #6f784d;
+  background: #ffffff88;
+  border: 1px solid #ffffff77;
+  border-radius: 4px;
+  padding: 4px 7px;
+  z-index: 2;
+}
+.card-demo {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  font-size: 6px;
+  color: #3c402877;
+  letter-spacing: 1.1px;
+}
+.card-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  display: grid;
+  place-items: center;
+  width: 49px;
+  height: 49px;
+  border: 1px solid #fff6;
+  border-radius: 50%;
+  color: #fff;
+  background: #2e392699;
+  backdrop-filter: blur(6px);
+  z-index: 4;
+  opacity: 0;
+  transition: 0.2s;
+}
+.game-card-art:hover .card-play,
+.game-card-art:focus-visible .card-play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.game-card-info {
+  padding: 17px 16px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.game-card-info > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.card-title {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font-size: 14px;
+  color: #4a6037;
+  font-weight: 500;
+  width: 100%;
+}
+.card-title > svg {
+  color: #b7c2a4;
+}
+.game-card-footer {
+  border-top: 1px solid #eef1e5;
+  margin: 0 16px;
+  padding: 13px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.game-card-footer > span:nth-child(2) {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  color: #91a578;
+}
+.game-card-footer > span:last-child {
+  font-size: 8px;
+  color: #bec8ae;
+}
+.card-menu {
+  position: relative;
+  align-self: flex-start;
+  margin-top: -5px;
+  margin-right: -7px;
+}
+.card-menu > .icon-btn {
+  color: #a5b396;
+}
+.dropdown {
+  position: absolute;
+  right: 0;
+  top: 30px;
+  background: #fff;
+  border: 1px solid #e3ead5;
+  border-radius: 8px;
+  padding: 5px;
+  z-index: 10;
+  box-shadow: 0 8px 25px #526b1a14;
+  min-width: 160px;
+}
+.dropdown > button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  color: #879d6e;
+  padding: 10px;
+  border-radius: 5px;
+  width: 100%;
+  text-align: left;
+}
+.dropdown > button:hover {
+  background: #f6f9ee;
+}
+.dropdown > .danger-text {
+  color: #b0856b;
+}
+.menu-dismiss {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  cursor: default;
+}
+.new-game-card {
+  min-height: 327px;
+  border: 1px dashed #dce5ca;
+  border-radius: 12px;
+  background: #f8faf2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 25px;
+  text-align: center;
+}
+.new-game-card:hover {
+  background: #f3f6e9;
+  border-color: #b9c79b;
+}
+.new-game-card > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 51px;
+  height: 51px;
+  border-radius: 50%;
+  border: 1px solid #dfe8cd;
+  color: #b0bd8d;
+  background: #f4f7e8;
+  margin-bottom: 22px;
+}
+.new-game-card h3 {
+  font-size: 14px;
+  font-weight: 400;
+  color: #98a97e;
+}
+.new-game-card p {
+  font-size: 10px;
+  color: #b7c1a5;
+  margin: 9px 0 24px;
+}
+.gallery-note {
+  font-size: 9px;
+  color: #b5c0a1;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 32px;
+  padding-top: 18px;
+  border-top: 1px solid #e8eedc;
+  gap: 15px;
+}
+.load-more {
+  display: flex;
+  justify-content: center;
+  margin: 25px;
+}
+.filter-tabs > button,
+.select-wrap select,
+.search input {
+  font-size: 11px;
+  color: #81956b;
+}
+@media (min-width: 1600px) {
+  .game-art {
+    height: 250px;
+  }
+}
+@media (max-width: 1190px) {
+  .game-grid {
+    gap: 16px;
+  }
+  .game-art {
+    height: 180px;
+  }
+  .gallery-toolbar {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .search {
+    width: 155px;
+  }
+  .filter-tabs > button {
+    padding: 7px;
+    font-size: 9px;
+  }
+}
+@media (max-width: 1000px) {
+  .game-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .game-art {
+    height: 195px;
+  }
+  .new-game-card {
+    min-height: 309px;
+  }
+}
+@media (max-width: 800px) {
+  .game-grid {
+    gap: 13px;
+  }
+  .game-art {
+    height: 155px;
+  }
+  .card-title {
+    font-size: 12px;
+  }
+  .game-card-info {
+    padding: 14px 12px;
+  }
+  .game-card-footer {
+    margin: 0 12px;
+    padding: 11px 0;
+  }
+  .game-card-footer > span:last-child {
+    display: none;
+  }
+  .new-game-card {
+    min-height: 266px;
+    padding: 15px;
+  }
+  .new-game-card h3 {
+    font-size: 12px;
+  }
+  .new-game-card p {
+    font-size: 9px;
+    line-height: 1.8;
+  }
+  .gallery-page .page-heading {
+    align-items: flex-start;
+  }
+  .gallery-page .page-heading > .button {
+    font-size: 0;
+    gap: 0;
+    padding: 11px;
+    margin-top: 22px;
+  }
+  .gallery-page .page-heading > .button svg {
+    width: 17px;
+    height: 17px;
+  }
+  .gallery-collection {
+    gap: 20px;
+  }
+  .gallery-collection > .demo-label {
+    display: none;
+  }
+  .gallery-toolbar .filter-tabs {
+    width: 100%;
+    flex: unset;
+  }
+  .gallery-toolbar .search {
+    flex: 1;
+  }
+  .gallery-note {
+    font-size: 8px;
+    line-height: 1.7;
+  }
+  .gallery-note > span:last-child {
+    display: none;
+  }
+}
+@media (max-width: 620px) {
+  .game-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .game-art {
+    height: 140px;
+  }
+  .game-art > svg {
+    padding: 4px;
+  }
+  .game-card-info {
+    padding: 14px 10px 12px;
+    gap: 4px;
+  }
+  .game-card-info .card-menu {
+    margin-right: -5px;
+    margin-top: -4px;
+  }
+  .card-title {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .card-title > svg {
+    display: none;
+  }
+  .game-card-footer {
+    margin: 0 10px;
+    padding: 10px 0;
+    gap: 3px;
+  }
+  .game-card-footer > .status {
+    font-size: 7px;
+    padding: 3px 4px;
+    gap: 3px;
+  }
+  .game-card-footer > span:nth-child(2) {
+    font-size: 8px;
+    gap: 3px;
+  }
+  .game-card-footer > span:nth-child(2) svg {
+    width: 11px;
+  }
+  .new-game-card {
+    min-height: 242px;
+  }
+  .new-game-card h3 {
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .new-game-card p {
+    font-size: 8px;
+    line-height: 1.8;
+    margin-bottom: 15px;
+  }
+  .new-game-card > span:first-child {
+    height: 43px;
+    width: 43px;
+    margin-bottom: 17px;
+  }
+  .new-game-card > .text-button {
+    font-size: 8px;
+  }
+  .art-genre {
+    font-size: 7px;
+    left: 10px;
+    top: 10px;
+    padding: 3px 5px;
+  }
+  .art-corner {
+    right: 10px;
+    top: 7px;
+    font-size: 15px;
+  }
+  .art-edition {
+    font-size: 5px;
+    right: 10px;
+    bottom: 10px;
+    letter-spacing: 0.6px;
+  }
+  .card-demo {
+    left: 10px;
+    bottom: 10px;
+    font-size: 5px;
+  }
+  .gallery-collection > button {
+    font-size: 11px;
+  }
+  .gallery-toolbar {
+    gap: 8px;
+  }
+  .gallery-toolbar .select-wrap {
+    font-size: 9px;
+  }
+  .gallery-toolbar .select-wrap select {
+    font-size: 9px;
+    max-width: 120px;
+  }
+  .filter-tabs > button {
+    font-size: 9px;
+    padding: 7px 11px;
+  }
+  .search {
+    width: 140px;
+    padding: 9px;
+  }
+  .game-card .icon-btn {
+    width: 24px;
+    height: 24px;
+  }
+  .game-card .icon-btn svg {
+    width: 16px;
+  }
+  .gallery-toolbar > .icon-btn {
+    display: none;
+  }
+  .gallery-collection {
+    gap: 23px;
+    margin-bottom: 16px;
+  }
+  .gallery-page .page-heading {
+    margin-bottom: 26px;
+  }
+  .game-card-footer .status {
+    font-size: 7px;
+  }
+  .filter-tabs > button,
+  .select-wrap select,
+  .search input {
+    font-size: 10px;
+  }
+}
