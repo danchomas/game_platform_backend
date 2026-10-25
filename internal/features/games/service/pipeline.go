@@ -29,7 +29,7 @@ func (s *Service) CreateGame(ctx context.Context, ownerID, prompt string, autoAp
 	}
 
 	g := domain.Game{ID: id, OwnerID: ownerID, Prompt: prompt}
-	spec, err := s.plan(ctx, g, domain.GenPlan, "")
+	spec, err := s.plan(ctx, g, domain.GenPlan, agent.PlanInput{}, waitForSlot)
 	wctx := context.WithoutCancel(ctx)
 	if err != nil {
 		// черновик остаётся со статусом failed: план можно перепросить, а попытка видна в статистике
@@ -80,12 +80,13 @@ func (s *Service) RevisePlan(ctx context.Context, userID, gameID, feedback strin
 	s.publish(gameID, domain.StatusPlanning, "", 0)
 
 	kind := domain.GenRevise
-	if specOf(g) == nil {
+	in := agent.PlanInput{Current: specOf(g), Feedback: feedback, History: s.history(ctx, gameID)}
+	if in.Current == nil {
 		// прошлый план не получился — строим заново с учётом уточнения
-		kind = domain.GenPlan
+		kind, in = domain.GenPlan, agent.PlanInput{}
 		g.Prompt += "\n\nУточнение: " + feedback
 	}
-	spec, err := s.plan(ctx, g, kind, feedback)
+	spec, err := s.plan(ctx, g, kind, in, waitForSlot)
 	wctx := context.WithoutCancel(ctx)
 	if err != nil {
 		s.setStatus(wctx, gameID, g.Status, "не удалось обновить план: "+err.Error(), 0)
@@ -164,8 +165,9 @@ func planStateErr(g domain.Game) error {
 	return apperr.NewValidationError("status", "игра уже собрана: правки — через чат игры")
 }
 
-func (s *Service) plan(ctx context.Context, g domain.Game, kind, feedback string) (domain.GameSpec, error) {
-	release, err := s.acquireSlot(ctx, waitForSlot)
+// plan вызывает планировщик; Prompt и Hint в in заполняются здесь.
+func (s *Service) plan(ctx context.Context, g domain.Game, kind string, in agent.PlanInput, wait time.Duration) (domain.GameSpec, error) {
+	release, err := s.acquireSlot(ctx, wait)
 	if err != nil {
 		return domain.GameSpec{}, err
 	}
@@ -176,10 +178,7 @@ func (s *Service) plan(ctx context.Context, g domain.Game, kind, feedback string
 		return domain.GameSpec{}, err
 	}
 	start, tr := time.Now(), &agent.Trace{}
-	in := agent.PlanInput{Prompt: g.Prompt, Hint: s.hint(ctx)}
-	if kind == domain.GenRevise {
-		in.Current, in.Feedback, in.History = specOf(g), feedback, s.history(ctx, g.ID)
-	}
+	in.Prompt, in.Hint = g.Prompt, s.hint(ctx)
 	spec, planErr := s.agent.Plan(ctx, in, tr)
 
 	res := genResult(genID, start, tr)
@@ -202,6 +201,13 @@ func (s *Service) savePlan(ctx context.Context, gameID, userText string, spec do
 }
 
 func (s *Service) launch(gameID, kind, instruction string) {
+	s.background(gameID, kind, func(ctx context.Context) {
+		s.runBuild(ctx, gameID, kind, instruction, waitForBuildSlot)
+	})
+}
+
+// background запускает работу агента над игрой в контексте приложения.
+func (s *Service) background(gameID, kind string, job func(ctx context.Context)) {
 	s.jobs.Add(1)
 	go func() {
 		defer s.jobs.Done()
@@ -211,14 +217,48 @@ func (s *Service) launch(gameID, kind, instruction string) {
 				s.failBuild(context.WithoutCancel(s.bg), gameID, kind, fmt.Errorf("внутренняя ошибка: %v", r))
 			}
 		}()
-		s.runBuild(s.bg, gameID, kind, instruction)
+		job(s.bg)
 	}()
 }
 
-func (s *Service) runBuild(ctx context.Context, gameID, kind, instruction string) {
+// StartVariant создаёт игру-вариант эксперимента и в фоне ведёт её от плана до сборки
+// без подтверждения: варианты сравнивают игроки, а не автор по одному.
+func (s *Service) StartVariant(ctx context.Context, in domain.VariantInput) (string, error) {
+	prompt, err := validatePrompt(in.Prompt)
+	if err != nil {
+		return "", err
+	}
+	in.Prompt = prompt
+	id, err := s.repo.CreateVariant(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	s.background(id, domain.GenBuild, func(ctx context.Context) { s.runVariant(ctx, id, in) })
+	return id, nil
+}
+
+func (s *Service) runVariant(ctx context.Context, gameID string, in domain.VariantInput) {
 	wctx := context.WithoutCancel(ctx)
 
-	release, err := s.acquireSlot(ctx, waitForBuildSlot)
+	g := domain.Game{ID: gameID, OwnerID: in.OwnerID, Prompt: in.Prompt}
+	spec, err := s.plan(ctx, g, domain.GenPlan, agent.PlanInput{Direction: in.Direction}, waitForVariantSlot)
+	if err != nil {
+		s.setStatus(wctx, gameID, domain.StatusFailed, "не удалось составить план: "+err.Error(), 0)
+		return
+	}
+	userText := in.Prompt + "\n\nВариант " + in.Label + ": " + in.Direction
+	if err := s.savePlan(wctx, gameID, userText, spec); err != nil {
+		s.failBuild(wctx, gameID, domain.GenBuild, err)
+		return
+	}
+	s.setStatus(wctx, gameID, domain.StatusGenerating, "", 0)
+	s.runBuild(ctx, gameID, domain.GenBuild, "", waitForVariantSlot)
+}
+
+func (s *Service) runBuild(ctx context.Context, gameID, kind, instruction string, wait time.Duration) {
+	wctx := context.WithoutCancel(ctx)
+
+	release, err := s.acquireSlot(ctx, wait)
 	if err != nil {
 		s.failBuild(wctx, gameID, kind, err)
 		return

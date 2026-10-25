@@ -44,8 +44,11 @@ type gameDTO struct {
 	Status       string          `json:"status"`
 	StatusDetail string          `json:"status_detail,omitempty"`
 	Spec         json.RawMessage `json:"spec,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	// ExperimentID и VariantLabel — у варианта мультигенерации.
+	ExperimentID string    `json:"experiment_id,omitempty"`
+	VariantLabel string    `json:"variant_label,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type messageDTO struct {
@@ -85,6 +88,8 @@ func (h *Handler) toGameDTO(g domain.Game) gameDTO {
 		Status:       g.Status,
 		StatusDetail: g.StatusDetail,
 		Spec:         json.RawMessage(g.Spec),
+		ExperimentID: g.ExperimentID,
+		VariantLabel: g.VariantLabel,
 		CreatedAt:    g.CreatedAt,
 		UpdatedAt:    g.UpdatedAt,
 	}

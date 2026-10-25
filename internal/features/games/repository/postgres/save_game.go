@@ -21,6 +21,19 @@ func (r *Repository) CreateGame(ctx context.Context, ownerID, prompt string) (st
 	return id, nil
 }
 
+// CreateVariant создаёт игру-вариант эксперимента: план для неё составляется в фоне.
+func (r *Repository) CreateVariant(ctx context.Context, in domain.VariantInput) (string, error) {
+	id := uuid.NewString()
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO games(id,owner_id,prompt,status,experiment_id,variant_label,variant_direction)
+		 VALUES($1,$2,$3,'planning',$4,$5,$6)`,
+		id, in.OwnerID, in.Prompt, in.ExperimentID, in.Label, in.Direction)
+	if err != nil {
+		return "", fmt.Errorf("создание варианта %s: %w", in.Label, err)
+	}
+	return id, nil
+}
+
 func (r *Repository) AddVersion(ctx context.Context, in domain.VersionInput) (int, error) {
 
 	tx, err := r.pool.Begin(ctx)

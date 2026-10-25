@@ -182,11 +182,18 @@ func specJSON(s domain.GameSpec) string {
 }
 
 // PlanMessages — первый план или правка текущего по отзыву пользователя.
-func PlanMessages(h HintInput, history []Msg, prompt string, current *domain.GameSpec, feedback string) []Msg {
+// direction — направление варианта мультигенерации: чем этот план должен отличаться от соседних.
+func PlanMessages(h HintInput, history []Msg, prompt string, current *domain.GameSpec, feedback, direction string) []Msg {
 	msgs := []Msg{{Role: "system", Content: PlannerSystem(h)}}
 	msgs = append(msgs, trimHistory(history)...)
 	if current == nil {
-		msgs = append(msgs, Msg{Role: "user", Content: "Game request:\n" + prompt})
+		content := "Game request:\n" + prompt
+		if direction != "" {
+			content += "\n\nVARIATION DIRECTION (this is one of several alternative versions of the same request " +
+				"that players will compare; follow this direction so the version is clearly different from the others, " +
+				"but keep the theme and constraints of the request):\n" + direction
+		}
+		msgs = append(msgs, Msg{Role: "user", Content: content})
 	} else {
 		msgs = append(msgs, Msg{Role: "user", Content: "Original request:\n" + prompt +
 			"\n\nCURRENT PLAN:\n" + specJSON(*current) + "\n\nFEEDBACK (apply it):\n" + feedback})
