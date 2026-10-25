@@ -5,14 +5,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
 	"beeline-games/internal/core/gamekit"
-	"beeline-games/internal/core/htmlguard"
 	"beeline-games/internal/core/llm"
 )
 
@@ -152,7 +151,7 @@ func (a *Agent) Plan(ctx context.Context, in PlanInput, tr *Trace) (domain.GameS
 			llm.Msg{Role: "user", Content: "That was not valid JSON. Return ONLY the JSON object of the plan."})
 	}
 	if lastErr != nil {
-		return spec, fmt.Errorf("%w: план не разобран: %w", apperr.ErrLLMFailed, lastErr)
+		return spec, lastErr
 	}
 	spec.Normalize()
 	if strings.TrimSpace(spec.Summary) == "" {
@@ -193,7 +192,7 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		stage = func(string, string) {}
 	}
 	if in.CurrentHTML == "" && in.Spec == nil {
-		return BuildOutput{}, apperr.NewValidationError("spec", "нет ни плана, ни текущего кода")
+		return BuildOutput{}, errors.New("agent: нет ни плана, ни текущего кода")
 	}
 
 	stage(domain.StatusGenerating, "")
@@ -268,34 +267,21 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 	return BuildOutput{HTML: res.HTML, Result: res, Issues: issues}, nil
 }
 
-// code — вызов модели, которая должна вернуть игру. Ответ проходит llm.Parse и htmlguard;
-// непригодный ответ получает ещё одну попытку, сетевая ошибка — нет.
+// code — вызов модели, которая должна вернуть игру; при неверном формате — ещё одна попытка.
 func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, tr *Trace) (llm.Result, error) {
 	var lastErr error
-	for attempt := range 2 {
+	for attempt := 0; attempt < 2; attempt++ {
 		raw, err := a.call(ctx, role, model, msgs, temp, 2, tr)
 		if err != nil {
 			return llm.Result{}, err
 		}
-		res, perr := parseGame(raw)
+		res, perr := llm.Parse(raw)
 		if perr == nil {
 			return res, nil
 		}
-		lastErr = fmt.Errorf("попытка %d: %w", attempt+1, perr)
+		lastErr = perr
 	}
 	return llm.Result{}, lastErr
-}
-
-func parseGame(raw string) (llm.Result, error) {
-	res, err := llm.Parse(raw)
-	if err != nil {
-		return llm.Result{}, fmt.Errorf("%w: %w", apperr.ErrLLMFailed, err)
-	}
-	res.HTML = htmlguard.Sanitize(res.HTML)
-	if err := htmlguard.Validate(res.HTML); err != nil {
-		return llm.Result{}, err
-	}
-	return res, nil
 }
 
 func errorsOnly(issues []domain.Issue) []domain.Issue {

@@ -1,29 +1,35 @@
 # Ревью для основного бэкендера (ветка `model`)
 
-Ветка `model` = текущий `main` + агентный конвейер генерации (моя зона: LLM, промпты, агент). Всё сделано под архитектуру `main`: порты у потребителя, DTO в транспорте, ошибки через `apperr`, `htmlguard` остаётся первым фильтром ответа модели.
+Моя зона — LLM, промпты, агент. Ниже то, что задевает остальной бэкенд.
 
-## ⚠️ Меняется контракт API (фронт в этой ветке уже обновлён)
+## ⚠️ Ломающие изменения API (фронта ещё нет, но смоук устарел)
 | Было | Стало |
 |---|---|
-| `POST /api/games {prompt}` → игра (синхронно) | → **план** `{game, plan, reply}`, `201`, статус `awaiting_approval`; `auto_approve:true` → `202` и сразу сборка |
-| `POST /api/games/{id}/messages` → новая версия (синхронно) | → `202 {game}`, сборка в фоне |
+| `POST /api/games {prompt}` → сразу игра (синхронно) | → **план** `{game, plan, reply}`, `201`, статус `awaiting_approval`. `auto_approve:true` → сразу сборка, `202` |
+| `POST /api/games/{id}/messages` → новая версия (синхронно) | → `202 {game}`, сборка в фоне; `409` если уже идёт |
 
-Новые маршруты: `POST /{id}/plan`, `POST /{id}/approve {spec?}`, `GET /{id}/status`, `GET /{id}/events` (SSE), `GET /{id}/generations`, `GET /{id}/preview.jpg`, `GET /api/generations/stats` (менеджер), `GET /api/benchmarks`. Подробно — README, раздел «Генерация».
+Новые маршруты (`games/transport/http/pipeline.go`):
+`POST /{id}/plan {content}` — правка плана · `POST /{id}/approve {spec?}` — запуск сборки (можно прислать отредактированный план) ·
+`GET /{id}/status` · `GET /{id}/events?token=` (SSE) · `GET /{id}/generations` · `GET /{id}/preview.jpg` ·
+`GET /api/generations/stats?days=` (manager) · `GET /api/benchmarks`.
+Статусы игры: `planning → awaiting_approval → generating → validating → testing → fixing → ready | failed`.
 
-## Что задето вне моей зоны — посмотри
-- `features/games` целиком: сервис стал конвейером (`pipeline.go`), `create_game.go`/`generate.go` удалены; одна сборка на игру — атомарный `TrySetStatus` в БД вместо `inflight sync.Map`; фоновые задачи на контексте приложения, `Wait()` в shutdown, `RecoverInterrupted()` при старте.
-- `games/repository`: новые колонки в `gameCols`; `ListOwnerGames` отдаёт и черновики (убран `version>0`) — у плана ещё нет кода.
-- `domain.Game`: `Status`, `StatusDetail`, `Spec`; `VersionInput.Instruction`.
-- `core/llm`: `Client` получил `Complete` (модель на запрос, запасные модели, usage/стоимость, повтор 429/5xx); `Chat` и классификация ошибок прежние. Старые `System`/`BuildMessages` заменены промптами ролей.
-- `config`: `LLM_PLANNER_MODEL`, `LLM_FIXER_MODEL`, `LLM_FALLBACK_MODELS`, `LLM_MAX_TOKENS`, `MAX_FIX_ROUNDS`, `BROWSER_*`; кодер по умолчанию `claude-haiku-5.5` (бюджет), `LLM_TIMEOUT_SEC` 240.
-- `migrations/000002_agent_pipeline`, compose-сервис `browser` (chromedp/headless-shell), `frontend/nginx.conf` — `proxy_buffering off` для SSE.
-- `go.mod`: `chromedp v0.14.2` (v0.21 сменил API на generic — не обновлять вслепую).
-- `scripts/smoke.sh`: под план → сборку; проверка порядка SDK теперь ищет `data-gamekit` (GameKit сам создаёт `<canvas>`).
+## Что я поменял вне своей зоны — посмотри
+- `play/service/service.go` — **баг**: не было `//go:embed sdk.js`, SDK вставлялся пустым → статистика не собиралась вообще.
+- `Dockerfile` — **баг**: собирал `./cmd/server` (нет такого), исправил на `./cmd/app`.
+- `docker-compose.yml` — сервис `browser` (chromedp/headless-shell) + переменные `LLM_*`, `BROWSER_WS_URL`, `OPENROUTER_URL`.
+- `migrations/000002_agent_pipeline` — `games.status/status_detail/spec`, таблицы `generations`, `llm_calls`.
+- `games/repository` — новые колонки в `gameCols`/scan; `ListOwnerGames` теперь отдаёт и черновики (убран фильтр `version>0`).
+- `games/service` — вместо `inflight sync.Map` атомарный `TrySetStatus` в БД; фоновые задачи на контексте приложения, `Wait()` в graceful shutdown, `RecoverInterrupted()` при старте.
+- `main.go` — wiring агента и тестера.
+- `go.mod` — `chromedp v0.14.2` (v0.21 поменял API на generic — не обновлять вслепую).
 
-## Проверено
-`go build/vet`, `go test -race ./...`, 28 тестов фронта, полный стек в Docker с моком LLM: план → правка → подтверждение → тест в Chrome поймал ошибки → исправитель → v1 → правка → v2, `smoke.sh` целиком. **С реальной моделью не проверялось** — нет ключа.
+## Нашёл, но не трогал
+1. `internal/core/transport/http/server/server.go` — остаток монолита, импортирует несуществующие пакеты → `go build ./...` / `go vet ./...` падают. Никем не импортируется — **удалить**.
+2. `GET /api/games/{id}`, `GET /g/{id}`, `preview.jpg` без auth-middleware → `userID` всегда пустой, владелец **не видит свои черновики**, хотя README обещает `?token=`. Нужен optional-auth middleware.
+3. `scripts/smoke.sh` и README устарели (ждут синхронную генерацию; README про `cmd/server`, `lib/pq`, gzip, которых нет).
+4. Нет rate-limit на `/api/games` и `/api/events`.
 
 ## Предложения
-- `analytics.TopInsights` с фильтром по жанру/аудитории — подсказки агенту станут точнее.
-- Дашборд: сравнивать метрики с `/api/benchmarks`, показывать `/api/generations/stats`.
-- SSE-брокер в памяти процесса: при нескольких репликах API нужен общий (Postgres LISTEN/NOTIFY).
+- `analytics.TopInsights` с фильтром по жанру/аудитории + «антипримеры» (низкий completion) — агент сразу станет точнее.
+- Дашборд: сравнивать метрики с `/api/benchmarks`.

@@ -3,25 +3,21 @@ package postgres
 import (
 	"context"
 	"errors"
-	"fmt"
 
-	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
+	coreErrs "beeline-games/internal/core/errors"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
-func (r *Repository) CreateGame(ctx context.Context, ownerID, prompt string) (string, error) {
+func (r *repository) CreateGame(ctx context.Context, ownerID, prompt string) (string, error) {
 	id := uuid.NewString()
 	_, err := r.pool.Exec(ctx, `INSERT INTO games(id,owner_id,prompt,status) VALUES($1,$2,$3,'planning')`, id, ownerID, prompt)
-	if err != nil {
-		return "", fmt.Errorf("создание игры: %w", err)
-	}
-	return id, nil
+	return id, err
 }
 
-func (r *Repository) AddVersion(ctx context.Context, in domain.VersionInput) (int, error) {
+func (r *repository) AddVersion(ctx context.Context, in domain.VersionInput) (int, error) {
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -39,7 +35,7 @@ func (r *Repository) AddVersion(ctx context.Context, in domain.VersionInput) (in
 		in.GameID, in.HTML, in.Title, in.Genre, in.Audience).Scan(&v)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, apperr.ErrNotFound
+		return 0, coreErrs.ErrNotFound
 	}
 	if err != nil {
 		return 0, err
