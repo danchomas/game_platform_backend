@@ -143,9 +143,15 @@
     ensureLayer().appendChild(el);
     return { def: b, el: el };
   }
+  function setControls(left, right, bottom) {
+    GK.controls = { left: Math.round(left), right: Math.round(right), bottom: Math.round(bottom) };
+    GK.controlsHeight = GK.controls.bottom;
+  }
   function layoutButtons() {
-    if (!buttons.length) { GK.controlsHeight = 0; return; }
-    var size = Math.round(Math.max(64, Math.min(view.width, view.height) * 0.17) * ui.scale);
+    if (!buttons.length) { setControls(0, 0, 0); return; }
+    // кнопки не должны съедать поле: ~13% меньшей стороны, но не мельче пальца и не крупнее 88px
+    var scale = Math.max(0.8, Math.min(1.25, ui.scale || 1));
+    var size = Math.round(Math.max(52, Math.min(88, Math.min(view.width, view.height) * 0.13)) * scale);
     var gap = Math.round(size * 0.25), sa = GK.safeArea, bottom = sa.bottom + gap;
     var groups = { left: [], right: [], center: [] };
     buttons.forEach(function (b) { (groups[b.def.anchor] || groups.right).push(b); });
@@ -167,7 +173,14 @@
     groups.right.forEach(function (b, i) { place(b, view.width - sa.right - gap - size - i * (size + gap), view.height - bottom - size); });
     var total = groups.center.length * size + (groups.center.length - 1) * gap;
     groups.center.forEach(function (b, i) { place(b, (view.width - total) / 2 + i * (size + gap), view.height - bottom - size); });
-    GK.controlsHeight = (isDpad ? size * 3 : size) + bottom + gap;
+    // в альбомной ориентации боковые группы стоят сбоку от поля и снизу места не занимают
+    var rows = function (g) { return g.length ? (g === groups.left && isDpad ? 3 : 1) * size + bottom + gap : 0; };
+    var cols = function (g, side) { return g.length ? side + gap * 2 + (g === groups.left && isDpad ? 3 * size : g.length * size + (g.length - 1) * gap) : 0; };
+    if (view.width > view.height) {
+      setControls(cols(groups.left, sa.left), cols(groups.right, sa.right), rows(groups.center));
+    } else {
+      setControls(0, 0, Math.max(rows(groups.left), rows(groups.right), rows(groups.center)));
+    }
   }
 
   /* ---------- клавиатура (десктоп) ---------- */
@@ -240,7 +253,8 @@
     version: "1.0",
     pointer: { down: false, x: 0, y: 0 },
     safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
-    controlsHeight: 0,
+    controls: { left: 0, right: 0, bottom: 0 },
+    controlsHeight: 0, // = controls.bottom, для старых игр
     get width() { return view.width; },
     get height() { return view.height; },
     get dpr() { return view.dpr; },

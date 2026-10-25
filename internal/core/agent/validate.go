@@ -16,8 +16,10 @@ var (
 	sdkStartRe = regexp.MustCompile(`GameSDK\s*\.\s*start\s*\(`)
 	sdkEndRe   = regexp.MustCompile(`GameSDK\s*\.\s*end\s*\(`)
 	kitOnRe    = regexp.MustCompile(`GameKit\s*\.\s*on\s*\(`)
-	canvasRe   = regexp.MustCompile(`(?i)<canvas|createElement\(\s*["']canvas|GameKit\s*\.\s*setup\s*\(`)
-	gkDefRe    = regexp.MustCompile(`window\.GameKit\s*=|var\s+GameKit\s*=|const\s+GameKit\s*=|let\s+GameKit\s*=`)
+	// вызов, а не проверка наличия: typeof GameKit.buttons === 'function' — не кнопки
+	kitButtonsRe = regexp.MustCompile(`GameKit\s*\.\s*buttons\s*\(`)
+	canvasRe     = regexp.MustCompile(`(?i)<canvas|createElement\(\s*["']canvas|GameKit\s*\.\s*setup\s*\(`)
+	gkDefRe      = regexp.MustCompile(`window\.GameKit\s*=|var\s+GameKit\s*=|const\s+GameKit\s*=|let\s+GameKit\s*=`)
 )
 
 // Validate — статические проверки поверх htmlguard: то, без чего игра формально
@@ -58,6 +60,9 @@ func Validate(html string, spec *domain.GameSpec) []domain.Issue {
 		add("no_canvas", domain.SevWarn, "no <canvas> found: the game should render with HTML5 Canvas/WebGL via GameKit.setup()")
 	}
 	if spec != nil {
+		if spec.Controls.Scheme != "buttons" && kitButtonsRe.MatchString(html) {
+			add("unwanted_buttons", domain.SevError, "the plan uses gestures, but the code adds on-screen buttons (GameKit.buttons): they cover the game field; remove them and use GameKit gestures")
+		}
 		if spec.Controls.Scheme == "buttons" && !strings.Contains(html, "GameKit.buttons") {
 			add("controls_mismatch", domain.SevWarn, "the plan requires on-screen buttons (GameKit.buttons) but the code does not create them")
 		}

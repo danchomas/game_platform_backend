@@ -25,7 +25,7 @@ Return ONLY one JSON object (no markdown, no prose) with this shape:
  "core_loop": ["step", "step", "step"],
  "win_condition": "...",
  "lose_condition": "... (for very young/elderly players prefer gentle fail states: lives, retry, no harsh punishment)",
- "controls": {"scheme": "tap|swipe|drag|hold|buttons|mixed", "gestures": ["tap","swipe","drag","hold"], "buttons": ["left","right","up","down","a","b"], "description": "how the player controls the game, in the request language"},
+ "controls": {"scheme": "tap|swipe|drag|hold|mixed|buttons", "gestures": ["tap","swipe","drag","hold"], "buttons": [], "description": "how the player controls the game, in the request language"},
  "difficulty": {"start": "...", "ramp": "how it gets harder over time/levels"},
  "round_seconds": 120,
  "levels": 1,
@@ -38,10 +38,14 @@ Return ONLY one JSON object (no markdown, no prose) with this shape:
 }
 
 DESIGN RULES:
-- Controls are TOUCH-FIRST. Pick the most natural single gesture for the genre:
+- Controls are GESTURES on the game field. Pick the most natural single gesture for the genre:
   snake/maze/2048/match -> swipe; clicker/one-button/flappy/timing -> tap; aiming/slingshot/drawing/paddle -> drag; charge/fly-up -> hold;
-  platformer/racing/shooter that need simultaneous movement -> on-screen "buttons" (leftright+jump etc.).
-  Avoid multi-finger gestures. Never require precise small taps.
+  falling blocks -> swipe left/right/down + tap to rotate; platformer/runner -> hold the left/right half of the screen to move, swipe up or tap to jump;
+  racing/shooter -> drag to steer or move (shooting is automatic).
+  "mixed" = several gestures together. Avoid multi-finger gestures. Never require precise small taps.
+- On-screen control buttons are NOT used: they cover the game field and play worse than gestures.
+  Never add them as an "alternative" or "for accessibility" (for elderly players make the field and the tappable objects large instead).
+  scheme "buttons" with a "buttons" list ONLY when the user explicitly asks for on-screen buttons; otherwise "buttons" must be [].
 - Respect the audience:
   elderly / "for grandma": ui.scale "xlarge", font_px >= 30, min_touch_px >= 96, high contrast, slow pace, no timers or very generous ones, forgiving rules, tap-based controls preferred over swipes, calm palette;
   children: ui.scale "large", bright saturated palette, friendly characters, short rounds (60-120 s), encouraging feedback, no scary content;
@@ -56,7 +60,7 @@ DESIGN RULES:
 // gameKitDoc — контракт runtime-библиотеки GameKit для кодера (см. internal/core/gamekit).
 const gameKitDoc = `GAMEKIT (a runtime library the platform injects automatically BEFORE your code; never define, copy or reimplement it):
   const {canvas, ctx, width, height} = GameKit.setup({background:'#123', uiScale:1.0});  // full-screen canvas, devicePixelRatio handled; draw in CSS pixels. Pass {webgl:true} to get a WebGL context instead.
-  GameKit.onResize((w, h) => {...});   GameKit.width / GameKit.height / GameKit.safeArea {top,right,bottom,left} / GameKit.controlsHeight (px occupied by on-screen buttons at the bottom)
+  GameKit.onResize((w, h) => {...});   GameKit.width / GameKit.height / GameKit.safeArea {top,right,bottom,left}
   Input events (coordinates are canvas CSS pixels):
     GameKit.on('tap', e => e.x, e.y)            quick tap/click
     GameKit.on('action', e => ...)              primary action: tap anywhere OR Space/Enter OR button 'a'  (best for one-button games and for "tap to start")
@@ -64,10 +68,11 @@ const gameKitDoc = `GAMEKIT (a runtime library the platform injects automaticall
     GameKit.on('dragstart'|'drag'|'dragend', e => e.x, e.y, e.dx, e.dy)
     GameKit.on('hold', e => ...)  /  GameKit.on('release', e => ...)
     GameKit.pointer -> {down, x, y}
-  On-screen buttons (only when the plan's control scheme is "buttons" or "mixed"):
-    GameKit.buttons('leftright+jump', {uiScale:1.3})   presets: 'leftright', 'dpad', 'jump', 'action' (join with '+'), or a custom list [{id:'left',label:'◀',anchor:'left'|'right'|'center'}]
+  Keyboard maps automatically (desktop): arrows/WASD -> swipe events and GameKit.isDown('left'|'right'|'up'|'down'), Space/Enter -> 'action'.
+  On-screen buttons — ONLY when the plan's control scheme is "buttons" (never otherwise, never "just in case"):
+    GameKit.buttons('leftright+jump')   presets: 'leftright', 'dpad', 'jump', 'action' (join with '+'), or a custom list [{id:'left',label:'◀',anchor:'left'|'right'|'center'}]
     GameKit.isDown('left')  for continuous movement;  GameKit.on('buttondown'|'buttonup', e => e.id)
-    keyboard maps automatically: arrows/WASD -> left/right/up/down, Space/Enter -> 'a', Z/X -> 'b'
+    GameKit.controls {left,right,bottom} — px taken by the buttons at each edge (they sit at the sides in landscape); keep the field out of them
     GameKit.showButtons(false) to hide them on start/result screens
   Sound: GameKit.sfx('click'|'coin'|'jump'|'hit'|'win'|'lose'|'powerup'|'move'|'pop'|'error');  GameKit.tone({freq:440, dur:0.15, type:'sine', vol:0.2, slide:880});
          GameKit.muteButton()  (adds a sound on/off toggle; audio unlocks automatically on the first touch)
@@ -91,10 +96,13 @@ OUTPUT FORMAT (strict, nothing outside these tags):
 HARD REQUIREMENTS:
 1. Pure HTML5 Canvas (2D) or WebGL. Inline <style> and <script> only. NO external URLs, CDNs, fonts, images, fetch/XHR, ES module imports. Graphics: draw procedurally (paths, gradients, emoji, inline SVG via data: URIs). Sounds: GameKit.sfx/tone only.
 2. Put the game <script> at the END of <body>. Call GameKit.setup() first. Use requestAnimationFrame with delta-time (clamp dt to 50 ms).
-3. Use GameKit for ALL input. Do not add your own touch/pointer/mouse listeners for gameplay. Implement exactly the control scheme from the plan.
+3. Use GameKit for ALL input. Do not add your own touch/pointer/mouse listeners for gameplay. Implement exactly the control scheme from the plan: gestures on the game field; call GameKit.buttons only if the scheme is "buttons".
 4. Game flow: start screen (title, one-line "how to play" with an icon of the gesture, big Play button) -> gameplay -> result screen (win/lose, score, big "Play again"). On the start screen ANY 'action' (tap anywhere) starts the game. Never leave the player in a dead end.
-5. Sizes follow the plan's ui block: text >= ui.font_px, touch targets >= ui.min_touch_px, keep gameplay out of GameKit.safeArea and above GameKit.controlsHeight.
-6. Responsive: portrait and landscape, any size from 320x480 to tablets; recompute layout in GameKit.onResize.
+5. ADAPTIVE LAYOUT: the screen can be any phone or tablet, portrait or landscape (320x480 up to 1366x1024), and it changes on rotation. In GameKit.onResize recompute everything from GameKit.width/height:
+   - the game field is the largest area that fits the screen minus GameKit.safeArea and the HUD, keeping its aspect ratio, centered (scale = min(availW/fieldW, availH/fieldH)); it should take most of the screen, never a small box in the middle;
+   - in landscape put the HUD/next-piece/side info BESIDE the field, not above it;
+   - text and HUD sizes scale with min(width, height) (but text >= ui.font_px, tappable objects >= ui.min_touch_px); no fixed pixel layouts.
+6. Gestures work on the whole field, not in a small zone; make tappable objects big.
 7. Robust code: no unhandled exceptions, no alert/confirm/prompt, localStorage only inside try/catch, no infinite loops, all variables declared.
 8. All in-game text in the plan's language.
 9. ANALYTICS (the managers rely on these). window.GameSDK may be absent, ALWAYS guard:
@@ -113,6 +121,7 @@ You are the QA FIX agent. The game below was checked automatically (static analy
 ` + gameKitDoc + `
 
 Typical causes: syntax errors, using variables before declaration, calling GameKit.setup() before <body> exists, the start screen not reacting to GameKit 'action', missing GameSDK.start()/end() calls, game loop not started, external URLs.
+If on-screen buttons are reported as unwanted: remove GameKit.buttons/showButtons/isDown-by-button code and control the game with GameKit gestures on the field instead (the plan's control description says which).
 
 OUTPUT FORMAT (strict, nothing outside these tags):
 <reply>one short sentence in Russian about what was fixed</reply>

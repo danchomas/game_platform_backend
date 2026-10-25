@@ -28,9 +28,10 @@ type GameSpec struct {
 }
 
 type Controls struct {
-	// tap | swipe | drag | hold | buttons | mixed
-	Scheme      string   `json:"scheme"`
-	Gestures    []string `json:"gestures"`
+	// tap | swipe | drag | hold | mixed (несколько жестов) | buttons (экранные кнопки, только по просьбе пользователя)
+	Scheme   string   `json:"scheme"`
+	Gestures []string `json:"gestures"`
+	// Buttons — только при Scheme "buttons": кнопки закрывают поле и играются хуже жестов.
 	Buttons     []string `json:"buttons"`
 	Description string   `json:"description"`
 }
@@ -76,6 +77,9 @@ func (s *GameSpec) Normalize() {
 	s.Controls.Scheme = strings.ToLower(strings.TrimSpace(s.Controls.Scheme))
 	if !controlSchemes[s.Controls.Scheme] {
 		s.Controls.Scheme = "tap"
+	}
+	if s.Controls.Scheme != "buttons" {
+		s.Controls.Buttons = nil
 	}
 	s.UI.Scale = strings.ToLower(strings.TrimSpace(s.UI.Scale))
 	minPx, ok := uiScales[s.UI.Scale]

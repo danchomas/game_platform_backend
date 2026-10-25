@@ -74,6 +74,46 @@ func TestValidateCatchesProblems(t *testing.T) {
 	}
 }
 
+func TestUnwantedButtonsAreSentToFixer(t *testing.T) {
+	withButtons := strings.Replace(goodGame, "GameKit.on(", "GameKit.buttons('dpad'); GameKit.on(", 1)
+	swipe := &domain.GameSpec{Controls: domain.Controls{Scheme: "swipe"}}
+
+	l := &fakeLLM{answers: []string{wrap(withButtons), wrap(goodGame)}}
+	tr := &Trace{}
+	if _, err := newAgent(l, nil).Build(context.Background(), BuildInput{Prompt: "тетрис", Spec: swipe}, nil, tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.FixRounds != 1 {
+		t.Fatalf("buttons in a gesture game must be fixed, rounds=%d issues=%+v", tr.FixRounds, tr.Issues)
+	}
+
+	// при правке просьба пользователя важнее плана: кнопки по его просьбе не убираем
+	l = &fakeLLM{answers: []string{wrap(withButtons)}}
+	tr = &Trace{}
+	in := BuildInput{Prompt: "тетрис", Spec: swipe, CurrentHTML: goodGame, Instruction: "добавь кнопки"}
+	if _, err := newAgent(l, nil).Build(context.Background(), in, nil, tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.FixRounds != 0 {
+		t.Fatalf("edit must not be checked against the plan: %+v", tr.Issues)
+	}
+
+	if issues := Validate(`if (typeof GameKit.buttons === 'function') {}`+goodGame, swipe); domain.HasErrors(issues) {
+		t.Fatalf("a feature check is not a button call: %+v", issues)
+	}
+}
+
+func TestPlanDropsButtonsFromGestureSchemes(t *testing.T) {
+	l := &fakeLLM{answers: []string{`{"title":"Тетрис","controls":{"scheme":"mixed","gestures":["swipe","tap"],"buttons":["left","right"]}}`}}
+	spec, err := newAgent(l, nil).Plan(context.Background(), PlanInput{Prompt: "тетрис"}, &Trace{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Controls.Buttons) != 0 {
+		t.Fatalf("buttons survived a gesture scheme: %+v", spec.Controls)
+	}
+}
+
 func TestPlanNormalizes(t *testing.T) {
 	l := &fakeLLM{answers: []string{"```json\n{\"title\":\"Змейка\",\"controls\":{\"scheme\":\"weird\"},\"ui\":{\"scale\":\"xlarge\"}}\n```"}}
 	spec, err := newAgent(l, nil).Plan(context.Background(), PlanInput{Prompt: "змейка для бабушки"}, &Trace{})

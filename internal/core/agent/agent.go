@@ -222,13 +222,19 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 	}
 	html := gamekit.Strip(res.HTML)
 
+	// Соответствие плану проверяем только у новой игры: при правке просьба пользователя
+	// («сделай кнопками») важнее плана.
+	planned := in.Spec
+	if in.CurrentHTML != "" {
+		planned = nil
+	}
 	var issues, earlier []domain.Issue
 	for round := 0; ; round++ {
 		if err := ctx.Err(); err != nil {
 			return BuildOutput{}, err
 		}
 		stage(domain.StatusValidating, "")
-		issues = Validate(html, in.Spec)
+		issues = Validate(html, planned)
 
 		if a.tester != nil {
 			stage(domain.StatusTesting, "")
