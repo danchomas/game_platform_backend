@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"beeline-games/internal/core/agent"
+	"beeline-games/internal/core/agent/browser"
 	"beeline-games/internal/core/collector"
 	"beeline-games/internal/core/config"
 	"beeline-games/internal/core/llm"
@@ -84,12 +86,36 @@ func run() error {
 		slog.Warn("OPENROUTER_API_KEY не задан: генерация игр будет отвечать «модель недоступна»")
 	}
 
+	var tester agent.Tester
+	if cfg.BrowserWSURL != "" {
+		tester = browser.New(cfg.BrowserWSURL, cfg.BrowserTimeout, cfg.BrowserMaxParallel)
+	} else {
+		slog.Warn("BROWSER_WS_URL не задан: игры проверяются только статически, без запуска в браузере")
+	}
+	gameAgent := agent.New(model, tester, agent.Config{
+		Models: agent.Models{
+			Planner:   cfg.PlannerModel,
+			Coder:     cfg.OpenRouterModel,
+			Fixer:     cfg.FixerModel,
+			Fallbacks: cfg.FallbackModels,
+			MaxTokens: cfg.LLMMaxTokens,
+		},
+		MaxFixRounds: cfg.MaxFixRounds,
+		CallTimeout:  cfg.LLMTimeout,
+	})
+	slog.Info("агент настроен",
+		"planner", cfg.PlannerModel, "coder", cfg.OpenRouterModel, "fixer", cfg.FixerModel,
+		"fix_rounds", cfg.MaxFixRounds, "browser_test", tester != nil)
+
 	users := authRepo.NewRepository(pool)
 	games := gamesRepo.NewRepository(pool)
 	stats := analyticsRepo.NewRepository(pool)
 
 	auth := authSvc.NewService(users, cfg.JWTSecret, cfg.ManagerCode)
-	gameCatalog := gamesSvc.NewService(games, model, nil, cfg.MaxConcurrentGen, cfg.LLMTimeout)
+	gameCatalog := gamesSvc.NewService(ctx, games, gameAgent, nil, cfg.MaxConcurrentGen)
+	if err := gameCatalog.RecoverInterrupted(ctx); err != nil {
+		slog.Error("прерванные генерации не сброшены", "err", err)
+	}
 	analytics := analyticsSvc.NewService(stats, gameCatalog)
 	play := playSvc.NewService(gameCatalog, eventCollector, cfg.PublicBaseURL)
 
@@ -136,6 +162,8 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("сервер не остановился мягко", "err", err)
 	}
+	// фоновые сборки отменены вместе с ctx: дожидаемся, пока они запишут итоговый статус
+	gameCatalog.Wait()
 
 	<-collectorDone
 	slog.Info("остановка завершена")
