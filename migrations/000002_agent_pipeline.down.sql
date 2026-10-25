@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS llm_calls;
+DROP TABLE IF EXISTS generations;
+ALTER TABLE games
+    DROP COLUMN IF EXISTS spec,
+    DROP COLUMN IF EXISTS status_detail,
+    DROP COLUMN IF EXISTS status;
