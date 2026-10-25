@@ -10,7 +10,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U beeline -d beeline"]
+      # -h 127.0.0.1: проверка по TCP. При первом запуске образ поднимает временный сервер
+      # только на unix-сокете — без -h он «здоров» раньше, чем база принимает соединения.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U beeline -d beeline"]
       interval: 3s
       timeout: 3s
       retries: 20
