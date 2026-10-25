@@ -19,8 +19,12 @@ const DefaultBaseURL = "https://openrouter.ai/api/v1"
 const chatPath = "/chat/completions"
 
 const (
+	// maxTokens — по умолчанию для Chat; агент передаёт свой лимит (LLM_MAX_TOKENS).
 	maxTokens   = 8000
 	temperature = 0.7
+
+	retries    = 1
+	retryDelay = 1500 * time.Millisecond
 
 	maxResponseBytes = 8 << 20
 
@@ -70,44 +74,103 @@ func (c *Client) Model() string { return c.model }
 var ErrNoKey = fmt.Errorf("%w: OPENROUTER_API_KEY не задан", apperr.ErrLLMUnavailable)
 
 type chatRequest struct {
-	Model       string  `json:"model"`
-	Messages    []Msg   `json:"messages"`
-	MaxTokens   int     `json:"max_tokens"`
-	Temperature float64 `json:"temperature"`
+	Model       string         `json:"model"`
+	Models      []string       `json:"models,omitempty"`
+	Messages    []Msg          `json:"messages"`
+	MaxTokens   int            `json:"max_tokens"`
+	Temperature float64        `json:"temperature"`
+	Usage       map[string]any `json:"usage,omitempty"`
 }
 
 type chatResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int     `json:"prompt_tokens"`
+		CompletionTokens int     `json:"completion_tokens"`
+		Cost             float64 `json:"cost"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Code    any    `json:"code"`
 	} `json:"error"`
 }
 
+// Chat — простой вызов модели клиента по умолчанию.
 func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
+	resp, err := c.Complete(ctx, Request{Messages: msgs})
+	return resp.Text, err
+}
+
+// Complete — вызов с выбором модели, запасными моделями (поле models OpenRouter),
+// учётом стоимости (usage.include) и повтором при 429/5xx.
+func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 	if c.apiKey == "" {
-		return "", ErrNoKey
+		return Response{}, ErrNoKey
 	}
 
-	body, err := json.Marshal(chatRequest{
-		Model:       c.model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
-	})
+	model := req.Model
+	if model == "" {
+		model = c.model
+	}
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = maxTokens
+	}
+	if req.Temperature == 0 {
+		req.Temperature = temperature
+	}
+
+	payload := chatRequest{
+		Model:       model,
+		Messages:    req.Messages,
+		MaxTokens:   req.MaxTokens,
+		Temperature: req.Temperature,
+		Usage:       map[string]any{"include": true},
+	}
+	if len(req.Fallbacks) > 0 {
+		payload.Models = append([]string{model}, req.Fallbacks...)
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("сборка запроса к модели: %w", err)
+		return Response{}, fmt.Errorf("сборка запроса к модели: %w", err)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return Response{}, ctx.Err()
+			case <-time.After(time.Duration(attempt) * retryDelay):
+			}
+		}
+		resp, err := c.do(ctx, body)
+		if err == nil {
+			if resp.Model == "" {
+				resp.Model = model
+			}
+			return resp, nil
+		}
+		lastErr = err
+		var se *statusError
+		if !errors.As(err, &se) || !se.retryable() {
+			return Response{}, err
+		}
+	}
+	return Response{}, lastErr
+}
+
+func (c *Client) do(ctx context.Context, body []byte) (Response, error) {
+	start := time.Now()
 	endpoint := c.baseURL + chatPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("%w: некорректный адрес %q: %v", apperr.ErrLLMUnavailable, endpoint, err)
+		return Response{}, fmt.Errorf("%w: некорректный адрес %q: %v", apperr.ErrLLMUnavailable, endpoint, err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -118,44 +181,68 @@ func (c *Client) Chat(ctx context.Context, msgs []Msg) (string, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", err
+			return Response{}, err
 		}
-		return "", fmt.Errorf("%w: запрос к %s не прошёл: %v", apperr.ErrLLMUnavailable, c.baseURL, err)
+		return Response{}, fmt.Errorf("%w: запрос к %s не прошёл: %v", apperr.ErrLLMUnavailable, c.baseURL, err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return "", fmt.Errorf("%w: ответ модели не дочитан: %v", apperr.ErrLLMUnavailable, err)
+		return Response{}, fmt.Errorf("%w: ответ модели не дочитан: %v", apperr.ErrLLMUnavailable, err)
 	}
 
-	return parseChatResponse(resp.StatusCode, raw)
+	out, err := parseChatResponse(resp.StatusCode, raw)
+	out.Latency = time.Since(start)
+	return out, err
 }
 
-func parseChatResponse(status int, raw []byte) (string, error) {
+// statusError — ошибка шлюза с HTTP-статусом: по нему решаем, повторять ли запрос.
+type statusError struct {
+	status int
+	err    error
+}
+
+func (e *statusError) Error() string { return e.err.Error() }
+
+func (e *statusError) Unwrap() error { return e.err }
+
+func (e *statusError) retryable() bool {
+	return e.status == http.StatusTooManyRequests || e.status == http.StatusRequestTimeout || e.status >= 500
+}
+
+func parseChatResponse(status int, raw []byte) (Response, error) {
 	var out chatResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("%w: HTTP %d, ответ не JSON: %s",
-			apperr.ErrLLMUnavailable, status, snippet(raw))
+		return Response{}, &statusError{status, fmt.Errorf("%w: HTTP %d, ответ не JSON: %s",
+			apperr.ErrLLMUnavailable, status, snippet(raw))}
 	}
 
 	if out.Error != nil {
-		return "", fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, out.Error.Message)
+		return Response{}, &statusError{status, fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, out.Error.Message)}
 	}
 	if status != http.StatusOK {
-		return "", fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, snippet(raw))
+		return Response{}, &statusError{status, fmt.Errorf("%w: HTTP %d: %s", apperr.ErrLLMUnavailable, status, snippet(raw))}
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("%w: модель вернула пустой список вариантов", apperr.ErrLLMFailed)
+		return Response{}, fmt.Errorf("%w: модель вернула пустой список вариантов", apperr.ErrLLMFailed)
 	}
 
-	content := out.Choices[0].Message.Content
-	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
-			apperr.ErrLLMFailed, out.Choices[0].FinishReason)
+	choice := out.Choices[0]
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return Response{}, fmt.Errorf("%w: модель вернула пустой ответ (finish_reason=%q)",
+			apperr.ErrLLMFailed, choice.FinishReason)
 	}
 
-	return content, nil
+	r := Response{Text: choice.Message.Content, Model: out.Model, FinishReason: choice.FinishReason}
+	if out.Usage != nil {
+		r.Usage = Usage{
+			PromptTokens:     out.Usage.PromptTokens,
+			CompletionTokens: out.Usage.CompletionTokens,
+			CostUSD:          out.Usage.Cost,
+		}
+	}
+	return r, nil
 }
 
 func snippet(b []byte) string {
