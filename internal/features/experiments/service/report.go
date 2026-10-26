@@ -2,15 +2,14 @@ package service
 
 import (
 	"context"
-	"hash/fnv"
 
-	"github.com/google/uuid"
-
-	"beeline-games/internal/core/apperr"
 	"beeline-games/internal/core/domain"
 )
 
-// Report — дашборд эксперимента: воронки вариантов с момента запуска и текущий лидер.
+// Report — дашборд эксперимента: воронки вариантов с момента запуска, доля трафика,
+// которую им отдал бандит, и вероятность каждого оказаться лучшим. Если лидер уже
+// набрал порог автоматической победы, отчёт сам завершает эксперимент: автор не
+// должен ждать следующего игрока, чтобы увидеть итог.
 func (s *Service) Report(ctx context.Context, userID, id string) (domain.ExperimentReport, error) {
 	x, err := s.owned(ctx, userID, id)
 	if err != nil {
@@ -29,65 +28,56 @@ func (s *Service) Report(ctx context.Context, userID, id string) (domain.Experim
 	if err != nil {
 		return domain.ExperimentReport{}, err
 	}
+	rep := domain.ExperimentReport{
+		Experiment: x, Variants: variants, Stats: stats,
+		AutoWinProb: autoWinProb, AutoMinTrials: autoMinTrials, AutoMinRivalTrials: autoMinRivalTrials,
+	}
+	if x.Status == domain.ExperimentDraft {
+		return rep, nil
+	}
 
-	rep := domain.ExperimentReport{Experiment: x, Variants: variants, Stats: stats}
-	rep.LeaderID, rep.Significant = leader(stats)
+	post, err := s.posterior(ctx, id, liveVariants(variants))
+	if err != nil {
+		return domain.ExperimentReport{}, err
+	}
+	var total int64
+	for _, st := range stats {
+		total += st.Exposures
+	}
+	for i := range rep.Stats {
+		st := &rep.Stats[i]
+		st.ProbBest = post.probOf(st.GameID)
+		if total > 0 {
+			st.TrafficShare = float64(st.Exposures) / float64(total)
+		}
+	}
+	if len(post.live) > 0 {
+		rep.LeaderID = post.live[post.leader()]
+	}
+
+	winner := post.winner()
+	rep.Significant = winner != ""
+	if winner != "" && x.Status == domain.ExperimentRunning {
+		ok, err := s.finish(ctx, id, winner, domain.WinnerAuto)
+		if err != nil {
+			return domain.ExperimentReport{}, err
+		}
+		if ok {
+			if rep.Experiment, err = s.repo.Get(ctx, id); err != nil {
+				return domain.ExperimentReport{}, err
+			}
+		}
+	}
 	return rep, nil
 }
 
-// leader — вариант с лучшей нижней границей интервала удержания. Это осторожная оценка:
-// пара удачных сессий на маленькой выборке её не переворачивает. significant — интервал
-// лидера целиком выше интервалов всех остальных показанных вариантов.
-func leader(stats []domain.VariantStats) (id string, significant bool) {
-	best := -1
-	for i, st := range stats {
-		if st.Exposures == 0 {
-			continue
-		}
-		if best < 0 || st.RetentionLow > stats[best].RetentionLow {
-			best = i
+// liveVariants — варианты, которые раздаёт ссылка, в порядке меток (как в Routing).
+func liveVariants(variants []domain.Variant) []string {
+	live := make([]string, 0, len(variants))
+	for _, v := range variants {
+		if v.Published && v.Version > 0 {
+			live = append(live, v.GameID)
 		}
 	}
-	if best < 0 {
-		return "", false
-	}
-
-	rivals := 0
-	significant = true
-	for i, st := range stats {
-		if i == best || st.Exposures == 0 {
-			continue
-		}
-		rivals++
-		if st.RetentionHigh >= stats[best].RetentionLow {
-			significant = false
-		}
-	}
-	return stats[best].GameID, significant && rivals > 0
-}
-
-// PickVariant выбирает вариант для игрока по ссылке эксперимента. Пока идёт эксперимент,
-// игрок закреплён за вариантом хэшем своего идентификатора: при повторном заходе он увидит
-// ту же игру. После выбора победителя все получают победителя.
-func (s *Service) PickVariant(ctx context.Context, id, playerID string) (string, error) {
-	if uuid.Validate(id) != nil {
-		return "", apperr.ErrNotFound
-	}
-	rt, err := s.repo.Routing(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	return route(rt, id, playerID)
-}
-
-func route(rt domain.ExperimentRouting, id, playerID string) (string, error) {
-	switch {
-	case rt.Status == domain.ExperimentFinished && rt.WinnerID != "":
-		return rt.WinnerID, nil
-	case rt.Status == domain.ExperimentRunning && len(rt.Live) > 0:
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(id + ":" + playerID))
-		return rt.Live[h.Sum32()%uint32(len(rt.Live))], nil
-	}
-	return "", apperr.ErrNotFound
+	return live
 }

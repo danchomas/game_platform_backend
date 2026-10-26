@@ -139,8 +139,38 @@ func TestExperimentLifecycle(t *testing.T) {
 	if gallery, err := games.ListPublished(ctx, domain.GameQuery{Limit: 100}); err != nil || containsGame(gallery, a) {
 		t.Fatalf("вариант до выбора победителя попал на витрину: %v", err)
 	}
-	if ok, err := repo.Finish(ctx, id, b); err != nil || !ok {
+	arms, err := repo.Arms(ctx, id, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byGame := map[string]domain.ArmStats{}
+	for _, a := range arms {
+		byGame[a.GameID] = a
+	}
+	if byGame[a].Trials != 2 || byGame[a].Successes != 1 || byGame[b].Trials != 1 || byGame[b].Successes != 0 {
+		t.Errorf("данные бандита: %+v", arms)
+	}
+	if early, _ := repo.Arms(ctx, id, time.Now().Add(-time.Hour)); len(early) != 0 {
+		t.Errorf("неустоявшиеся показы попали к бандиту: %+v", early)
+	}
+
+	if got, err := repo.Assignment(ctx, id, "p1"); err != nil || got != "" {
+		t.Fatalf("закрепление нового игрока: %q, %v", got, err)
+	}
+	for _, gid := range []string{a, b} {
+		if err := repo.Assign(ctx, id, "p1", gid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := repo.Assignment(ctx, id, "p1"); err != nil || got != b {
+		t.Fatalf("переназначение игрока: %q, %v", got, err)
+	}
+
+	if ok, err := repo.Finish(ctx, id, b, domain.WinnerAuto); err != nil || !ok {
 		t.Fatalf("выбор победителя: %v, %v", ok, err)
+	}
+	if ok, _ := repo.Finish(ctx, id, a, domain.WinnerAuto); ok {
+		t.Error("бандит перебил уже выбранного победителя")
 	}
 	gallery, err := games.ListPublished(ctx, domain.GameQuery{Limit: 100})
 	if err != nil || !containsGame(gallery, b) || containsGame(gallery, a) {
@@ -148,6 +178,12 @@ func TestExperimentLifecycle(t *testing.T) {
 	}
 	if rt, _ := repo.Routing(ctx, id); rt.WinnerID != b || rt.Status != domain.ExperimentFinished {
 		t.Errorf("маршрутизация завершённого: %+v", rt)
+	}
+	if x, _ := repo.Get(ctx, id); x.WinnerSource != domain.WinnerAuto {
+		t.Errorf("источник победы = %q, ожидался auto", x.WinnerSource)
+	}
+	if ok, err := repo.Finish(ctx, id, a, domain.WinnerManual); err != nil || !ok {
+		t.Fatalf("автор не смог поменять победителя: %v, %v", ok, err)
 	}
 	if g, err := games.GetGame(ctx, b); err != nil || g.ExperimentID != id || g.VariantLabel != "B" {
 		t.Errorf("игра не знает свой эксперимент: %+v, %v", g, err)

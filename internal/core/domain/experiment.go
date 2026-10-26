@@ -12,6 +12,12 @@ const (
 	ExperimentFinished = "finished"
 )
 
+// Кто выбрал победителя эксперимента.
+const (
+	WinnerManual = "manual"
+	WinnerAuto   = "auto"
+)
+
 // RetainedSeconds — сколько секунд активной игры делают показ варианта успешным.
 // Метрику считает SDK одинаково для всех вариантов, в отличие от событий,
 // которые шлёт код игры, написанный моделью.
@@ -23,11 +29,12 @@ type Experiment struct {
 	Title   string
 	Prompt  string
 	Status  string
-	// WinnerID — пусто, пока победитель не выбран.
-	WinnerID   string
-	CreatedAt  time.Time
-	LaunchedAt *time.Time
-	FinishedAt *time.Time
+	// WinnerID — пусто, пока победитель не выбран; WinnerSource — кем (Winner*).
+	WinnerID     string
+	WinnerSource string
+	CreatedAt    time.Time
+	LaunchedAt   *time.Time
+	FinishedAt   *time.Time
 	// Variants и Ready — сводка по вариантам: всего и собранных.
 	Variants int
 	Ready    int
@@ -89,6 +96,13 @@ type ExperimentRouting struct {
 	Live []string
 }
 
+// ArmStats — «рука» бандита: устоявшиеся показы варианта и сколько из них удержали игрока.
+type ArmStats struct {
+	GameID    string
+	Trials    int64
+	Successes int64
+}
+
 // VariantStats — воронка варианта: показ → загрузка → вовлечение → удержание.
 // Учитываются только сессии, пришедшие по ссылке эксперимента.
 type VariantStats struct {
@@ -114,6 +128,12 @@ type VariantStats struct {
 	ErrorRate      float64
 	CompletionRate float64
 	WinRate        float64
+
+	// TrafficShare — доля показов эксперимента, доставшаяся варианту: по ней видно,
+	// как бандит смещает трафик к лучшему.
+	TrafficShare float64
+	// ProbBest — апостериорная вероятность того, что у варианта лучшее удержание.
+	ProbBest float64
 }
 
 // ExperimentReport — дашборд эксперимента: варианты, их воронки и текущий лидер.
@@ -121,10 +141,15 @@ type ExperimentReport struct {
 	Experiment Experiment
 	Variants   []Variant
 	Stats      []VariantStats
-	// LeaderID — вариант с лучшей нижней границей RetentionRate, пусто — показов ещё не было.
+	// LeaderID — вариант с наибольшей ProbBest, пусто — эксперимент не запущен.
 	LeaderID string
-	// Significant — интервал лидера не пересекается с интервалами остальных вариантов.
+	// Significant — лидер набрал порог вероятности и данных для автоматической победы.
 	Significant bool
+	// AutoWinProb и AutoMinTrials — правило автоматической победы, по которому
+	// бандит завершает эксперимент.
+	AutoWinProb        float64
+	AutoMinTrials      int
+	AutoMinRivalTrials int
 }
 
 func (s *VariantStats) Derive() {

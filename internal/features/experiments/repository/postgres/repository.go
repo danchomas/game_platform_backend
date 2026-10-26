@@ -21,12 +21,12 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const experimentCols = `x.id, x.owner_id, x.title, x.prompt, x.status, coalesce(x.winner_id::text,''),
+const experimentCols = `x.id, x.owner_id, x.title, x.prompt, x.status, coalesce(x.winner_id::text,''), x.winner_source,
 	x.created_at, x.launched_at, x.finished_at,
 	count(g.id), count(g.id) FILTER (WHERE g.status='ready' AND g.version>0)`
 
 func experimentDest(x *domain.Experiment) []any {
-	return []any{&x.ID, &x.OwnerID, &x.Title, &x.Prompt, &x.Status, &x.WinnerID,
+	return []any{&x.ID, &x.OwnerID, &x.Title, &x.Prompt, &x.Status, &x.WinnerID, &x.WinnerSource,
 		&x.CreatedAt, &x.LaunchedAt, &x.FinishedAt, &x.Variants, &x.Ready}
 }
 
@@ -120,11 +120,12 @@ func (r *Repository) Launch(ctx context.Context, id string) (bool, error) {
 	return tag.RowsAffected() == 1, nil
 }
 
-// Finish фиксирует победителя; выбор можно поменять и после завершения.
-func (r *Repository) Finish(ctx context.Context, id, winnerID string) (bool, error) {
+// Finish фиксирует победителя. Автор может поменять выбор и после завершения,
+// бандит — только завершить идущий эксперимент: решение автора он не перебивает.
+func (r *Repository) Finish(ctx context.Context, id, winnerID, source string) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE experiments SET status='finished', winner_id=$2, finished_at=now()
-		 WHERE id=$1 AND status IN ('running','finished')`, id, winnerID)
+		`UPDATE experiments SET status='finished', winner_id=$2, winner_source=$3, finished_at=now()
+		 WHERE id=$1 AND (status='running' OR (status='finished' AND $3='manual'))`, id, winnerID, source)
 	if err != nil {
 		return false, fmt.Errorf("выбор победителя: %w", err)
 	}
@@ -146,4 +147,32 @@ func (r *Repository) Routing(ctx context.Context, id string) (domain.ExperimentR
 		return domain.ExperimentRouting{}, fmt.Errorf("чтение маршрутизации эксперимента: %w", err)
 	}
 	return rt, nil
+}
+
+// Assignment — вариант, за которым закреплён игрок; пусто — игрок пришёл впервые.
+func (r *Repository) Assignment(ctx context.Context, id, playerID string) (string, error) {
+	var gameID string
+	err := r.pool.QueryRow(ctx,
+		`SELECT game_id::text FROM experiment_assignments WHERE experiment_id=$1 AND player_id=$2`,
+		id, playerID).Scan(&gameID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("чтение закрепления игрока: %w", err)
+	}
+	return gameID, nil
+}
+
+// Assign закрепляет игрока за вариантом; повторный вызов переназначает его
+// (прежний вариант сняли с эксперимента).
+func (r *Repository) Assign(ctx context.Context, id, playerID, gameID string) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO experiment_assignments(experiment_id,player_id,game_id) VALUES($1,$2,$3)
+		 ON CONFLICT (experiment_id,player_id) DO UPDATE SET game_id=EXCLUDED.game_id, created_at=now()`,
+		id, playerID, gameID)
+	if err != nil {
+		return fmt.Errorf("закрепление игрока: %w", err)
+	}
+	return nil
 }

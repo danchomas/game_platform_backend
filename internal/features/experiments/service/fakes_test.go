@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
@@ -21,14 +22,19 @@ type fakeRepo struct {
 	experiments map[string]domain.Experiment
 	variants    map[string][]domain.Variant
 	stats       []domain.VariantStats
-	routing     domain.ExperimentRouting
 	statsSince  time.Time
+
+	arms        []domain.ArmStats
+	armsBefore  time.Time
+	armsCalls   int
+	assignments map[string]string
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		experiments: make(map[string]domain.Experiment),
 		variants:    make(map[string][]domain.Variant),
+		assignments: make(map[string]string),
 	}
 }
 
@@ -80,20 +86,55 @@ func (f *fakeRepo) Launch(_ context.Context, id string) (bool, error) {
 	return true, nil
 }
 
-func (f *fakeRepo) Finish(_ context.Context, id, winnerID string) (bool, error) {
+func (f *fakeRepo) Finish(_ context.Context, id, winnerID, source string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	x := f.experiments[id]
-	if x.Status == domain.ExperimentDraft {
+	manualOverride := x.Status == domain.ExperimentFinished && source == domain.WinnerManual
+	if x.Status != domain.ExperimentRunning && !manualOverride {
 		return false, nil
 	}
-	x.Status, x.WinnerID = domain.ExperimentFinished, winnerID
+	x.Status, x.WinnerID, x.WinnerSource = domain.ExperimentFinished, winnerID, source
 	f.experiments[id] = x
 	return true, nil
 }
 
-func (f *fakeRepo) Routing(context.Context, string) (domain.ExperimentRouting, error) {
-	return f.routing, nil
+// Routing собирается из состояния, как в базе: live — опубликованные варианты с кодом.
+func (f *fakeRepo) Routing(_ context.Context, id string) (domain.ExperimentRouting, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	x, ok := f.experiments[id]
+	if !ok {
+		return domain.ExperimentRouting{}, apperr.ErrNotFound
+	}
+	rt := domain.ExperimentRouting{Status: x.Status, WinnerID: x.WinnerID}
+	for _, v := range f.variants[id] {
+		if v.Published && v.Version > 0 {
+			rt.Live = append(rt.Live, v.GameID)
+		}
+	}
+	return rt, nil
+}
+
+func (f *fakeRepo) Assignment(_ context.Context, _, playerID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.assignments[playerID], nil
+}
+
+func (f *fakeRepo) Assign(_ context.Context, _, playerID, gameID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.assignments[playerID] = gameID
+	return nil
+}
+
+func (f *fakeRepo) Arms(_ context.Context, _ string, before time.Time) ([]domain.ArmStats, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.armsCalls++
+	f.armsBefore = before
+	return slices.Clone(f.arms), nil
 }
 
 func (f *fakeRepo) VariantStats(_ context.Context, _ string, since time.Time) ([]domain.VariantStats, error) {
@@ -141,3 +182,22 @@ func ready(label string) domain.Variant {
 	return domain.Variant{GameID: "game-" + label, Label: label, Status: domain.StatusReady,
 		Version: 1, BuildStatus: domain.GenStatusReady}
 }
+
+func live(label string) domain.Variant {
+	v := ready(label)
+	v.Published = true
+	return v
+}
+
+// newBanditService — сервис с детерминированным генератором и управляемыми часами.
+func newBanditService(repo *fakeRepo) (*Service, *fakeClock) {
+	clock := &fakeClock{t: time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)}
+	svc := NewService(repo, &fakeGames{})
+	svc.rnd = rand.New(rand.NewPCG(7, 11))
+	svc.now = clock.now
+	return svc, clock
+}
+
+type fakeClock struct{ t time.Time }
+
+func (c *fakeClock) now() time.Time { return c.t }

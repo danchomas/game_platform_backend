@@ -6,11 +6,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"beeline-games/internal/core/apperr"
+	"beeline-games/internal/core/bandit"
 	"beeline-games/internal/core/domain"
 )
 
@@ -43,10 +46,23 @@ var directions = [maxVariants]direction{
 type Service struct {
 	repo  ExperimentRepository
 	games VariantGames
+
+	// rnd и now подменяются в тестах: выбор бандита случаен, окно показов зависит от времени.
+	rnd bandit.Rand
+	now func() time.Time
+
+	postMu     sync.Mutex
+	posteriors map[string]posterior
 }
 
 func NewService(repo ExperimentRepository, games VariantGames) *Service {
-	return &Service{repo: repo, games: games}
+	return &Service{
+		repo:       repo,
+		games:      games,
+		rnd:        bandit.Global,
+		now:        time.Now,
+		posteriors: make(map[string]posterior),
+	}
 }
 
 // Create заводит эксперимент и запускает сборку вариантов в фоне; ход сборки виден в Get.
@@ -159,7 +175,7 @@ func (s *Service) ChooseWinner(ctx context.Context, userID, id, gameID string) (
 			"победителем может быть только вариант, который участвует в эксперименте")
 	}
 
-	ok, err := s.repo.Finish(ctx, id, gameID)
+	ok, err := s.finish(ctx, id, gameID, domain.WinnerManual)
 	if err != nil {
 		return domain.Experiment{}, nil, err
 	}

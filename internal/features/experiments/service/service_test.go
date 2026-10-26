@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 
@@ -160,8 +159,7 @@ func TestExperimentAccess(t *testing.T) {
 }
 
 func TestChooseWinner(t *testing.T) {
-	live := ready("A")
-	live.Published = true
+	published := live("A")
 	hidden := ready("B")
 
 	tests := []struct {
@@ -170,16 +168,16 @@ func TestChooseWinner(t *testing.T) {
 		gameID string
 		field  string
 	}{
-		{name: "draft experiment", status: domain.ExperimentDraft, gameID: live.GameID, field: "status"},
+		{name: "draft experiment", status: domain.ExperimentDraft, gameID: published.GameID, field: "status"},
 		{name: "unpublished variant", status: domain.ExperimentRunning, gameID: hidden.GameID, field: "game_id"},
 		{name: "foreign game", status: domain.ExperimentRunning, gameID: "game-x", field: "game_id"},
-		{name: "live variant", status: domain.ExperimentRunning, gameID: live.GameID},
-		{name: "change winner", status: domain.ExperimentFinished, gameID: live.GameID},
+		{name: "live variant", status: domain.ExperimentRunning, gameID: published.GameID},
+		{name: "override auto winner", status: domain.ExperimentFinished, gameID: published.GameID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			repo.seed(tt.status, live, hidden)
+			repo.seed(tt.status, published, hidden)
 
 			x, _, err := NewService(repo, &fakeGames{}).ChooseWinner(context.Background(), ownerID, expID, tt.gameID)
 
@@ -193,116 +191,9 @@ func TestChooseWinner(t *testing.T) {
 			if err != nil {
 				t.Fatalf("победитель не выбран: %v", err)
 			}
-			if x.Status != domain.ExperimentFinished || x.WinnerID != tt.gameID {
+			if x.Status != domain.ExperimentFinished || x.WinnerID != tt.gameID || x.WinnerSource != domain.WinnerManual {
 				t.Errorf("эксперимент не завершён победителем: %+v", x)
 			}
 		})
-	}
-}
-
-func TestReportCountsFromLaunch(t *testing.T) {
-	repo := newFakeRepo()
-	repo.seed(domain.ExperimentDraft, ready("A"), ready("B"))
-	svc := NewService(repo, &fakeGames{})
-	if _, _, err := svc.Launch(context.Background(), ownerID, expID); err != nil {
-		t.Fatal(err)
-	}
-	repo.stats = []domain.VariantStats{
-		stats("game-A", 400, 200),
-		stats("game-B", 400, 80),
-	}
-
-	rep, err := svc.Report(context.Background(), ownerID, expID)
-	if err != nil {
-		t.Fatalf("отчёт не собран: %v", err)
-	}
-	if want := *repo.experiment().LaunchedAt; !repo.statsSince.Equal(want) {
-		t.Errorf("статистика с %v, ожидалась с момента запуска %v", repo.statsSince, want)
-	}
-	if rep.LeaderID != "game-A" || !rep.Significant {
-		t.Errorf("лидер %q (значимо: %v), ожидался значимый game-A", rep.LeaderID, rep.Significant)
-	}
-	if len(rep.Variants) != 2 || len(rep.Stats) != 2 {
-		t.Errorf("в отчёте не все варианты: %+v", rep)
-	}
-}
-
-func stats(gameID string, exposures, retained int64) domain.VariantStats {
-	st := domain.VariantStats{GameID: gameID, Exposures: exposures, Sessions: exposures, Retained: retained}
-	st.Derive()
-	return st
-}
-
-func TestLeader(t *testing.T) {
-	tests := []struct {
-		name        string
-		stats       []domain.VariantStats
-		want        string
-		significant bool
-	}{
-		{name: "no exposures", stats: []domain.VariantStats{stats("a", 0, 0), stats("b", 0, 0)}},
-		{name: "clear winner", stats: []domain.VariantStats{stats("a", 500, 100), stats("b", 500, 300)}, want: "b", significant: true},
-		{name: "too little data", stats: []domain.VariantStats{stats("a", 10, 3), stats("b", 10, 6)}, want: "b"},
-		{name: "single shown variant", stats: []domain.VariantStats{stats("a", 50, 30), stats("b", 0, 0)}, want: "a"},
-		{
-			// 1 из 1 — это 100%, но нижняя граница у неё ниже, чем у 60 из 100
-			name:  "lucky small sample loses",
-			stats: []domain.VariantStats{stats("a", 1, 1), stats("b", 100, 60)},
-			want:  "b",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, significant := leader(tt.stats)
-			if got != tt.want || significant != tt.significant {
-				t.Errorf("leader = %q (значимо: %v), ожидалось %q (значимо: %v)", got, significant, tt.want, tt.significant)
-			}
-		})
-	}
-}
-
-func TestRoute(t *testing.T) {
-	live := []string{"game-A", "game-B", "game-C"}
-	tests := []struct {
-		name string
-		rt   domain.ExperimentRouting
-		want string
-		err  error
-	}{
-		{name: "draft is hidden", rt: domain.ExperimentRouting{Status: domain.ExperimentDraft, Live: live}, err: apperr.ErrNotFound},
-		{name: "running without live variants", rt: domain.ExperimentRouting{Status: domain.ExperimentRunning}, err: apperr.ErrNotFound},
-		{name: "finished serves winner", rt: domain.ExperimentRouting{Status: domain.ExperimentFinished, WinnerID: "game-B", Live: live}, want: "game-B"},
-		{name: "finished without winner", rt: domain.ExperimentRouting{Status: domain.ExperimentFinished, Live: live}, err: apperr.ErrNotFound},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := route(tt.rt, expID, "player-1")
-			if !errors.Is(err, tt.err) || got != tt.want {
-				t.Errorf("route = %q, %v; ожидалось %q, %v", got, err, tt.want, tt.err)
-			}
-		})
-	}
-}
-
-func TestRouteIsStickyAndSpreadsPlayers(t *testing.T) {
-	rt := domain.ExperimentRouting{Status: domain.ExperimentRunning, Live: []string{"game-A", "game-B", "game-C"}}
-
-	counts := map[string]int{}
-	for i := range 3000 {
-		player := fmt.Sprintf("player-%d", i)
-		first, err := route(rt, expID, player)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if again, _ := route(rt, expID, player); again != first {
-			t.Fatalf("игрок %q при повторном заходе попал в %q вместо %q", player, again, first)
-		}
-		counts[first]++
-	}
-	for _, id := range rt.Live {
-		// при равномерном делении — 1000 на вариант; 800 — далеко за пределами случайного разброса
-		if counts[id] < 800 {
-			t.Errorf("вариант %s получил %d игроков из 3000: деление неравномерное (%v)", id, counts[id], counts)
-		}
 	}
 }

@@ -54,3 +54,38 @@ func (r *Repository) VariantStats(ctx context.Context, id string, since time.Tim
 	}
 	return out, nil
 }
+
+// Arms — данные для бандита: показы до before и сколько из них удержали игрока.
+// Свежие показы в выборку не входят: их сессия ещё идёт, и засчитать её неудачей
+// значило бы наказать вариант за то, что в него сейчас играют. Показы бывают только
+// у запущенного эксперимента, поэтому нижняя граница по времени не нужна.
+func (r *Repository) Arms(ctx context.Context, id string, before time.Time) ([]domain.ArmStats, error) {
+	rows, err := r.pool.Query(ctx, `
+	  WITH shown AS (
+	    SELECT DISTINCT e.game_id, e.session_id FROM events e
+	    JOIN games g ON g.id=e.game_id
+	    WHERE g.experiment_id=$1 AND e.type='exposure' AND e.ts < $2)
+	  SELECT s.game_id::text, count(DISTINCT s.session_id),
+	    count(DISTINCT e.session_id) FILTER (WHERE e.duration_ms >= $3)
+	  FROM shown s
+	  LEFT JOIN events e ON e.game_id=s.game_id AND e.session_id=s.session_id AND e.type='session_end'
+	  GROUP BY s.game_id`,
+		id, before, int64(domain.RetainedSeconds*1000))
+	if err != nil {
+		return nil, fmt.Errorf("данные бандита: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ArmStats
+	for rows.Next() {
+		var a domain.ArmStats
+		if err := rows.Scan(&a.GameID, &a.Trials, &a.Successes); err != nil {
+			return nil, fmt.Errorf("разбор данных бандита: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("обход данных бандита: %w", err)
+	}
+	return out, nil
+}

@@ -22,6 +22,8 @@ type experimentDTO struct {
 	Prompt   string `json:"prompt"`
 	Status   string `json:"status"`
 	WinnerID string `json:"winner_id,omitempty"`
+	// WinnerSource — кто выбрал победителя: manual (автор) или auto (бандит).
+	WinnerSource string `json:"winner_source,omitempty"`
 	// PlayURL — общая ссылка: раздаёт игрокам варианты, после выбора победителя — его.
 	PlayURL       string     `json:"play_url"`
 	VariantsTotal int        `json:"variants_total"`
@@ -75,6 +77,10 @@ type variantStatsDTO struct {
 	ErrorRate      float64 `json:"error_rate"`
 	CompletionRate float64 `json:"completion_rate"`
 	WinRate        float64 `json:"win_rate"`
+	// TrafficShare — доля показов, которую вариант получил от бандита.
+	TrafficShare float64 `json:"traffic_share"`
+	// ProbBest — вероятность, что у варианта лучшее удержание.
+	ProbBest float64 `json:"prob_best"`
 }
 
 type reportVariantDTO struct {
@@ -89,6 +95,13 @@ type reportDTO struct {
 	Significant bool               `json:"significant"`
 	// RetainedSeconds — порог удержания, по которому сравниваются варианты.
 	RetainedSeconds int `json:"retained_seconds"`
+	// Allocation — как ссылка распределяет новых игроков.
+	Allocation string `json:"allocation"`
+	// AutoWinProb, AutoMinTrials (лидеру) и AutoMinRivalTrials (остальным) — правило,
+	// по которому бандит сам выбирает победителя.
+	AutoWinProb        float64 `json:"auto_win_prob"`
+	AutoMinTrials      int     `json:"auto_min_trials"`
+	AutoMinRivalTrials int     `json:"auto_min_rival_trials"`
 }
 
 func (h *Handler) toExperimentDTO(x domain.Experiment) experimentDTO {
@@ -98,6 +111,7 @@ func (h *Handler) toExperimentDTO(x domain.Experiment) experimentDTO {
 		Prompt:        x.Prompt,
 		Status:        x.Status,
 		WinnerID:      x.WinnerID,
+		WinnerSource:  x.WinnerSource,
 		PlayURL:       h.publicBaseURL + "/e/" + x.ID,
 		VariantsTotal: x.Variants,
 		VariantsReady: x.Ready,
@@ -143,11 +157,15 @@ func (h *Handler) toReportDTO(rep domain.ExperimentReport) reportDTO {
 	}
 
 	out := reportDTO{
-		Experiment:      h.toExperimentDTO(rep.Experiment),
-		Variants:        make([]reportVariantDTO, 0, len(rep.Variants)),
-		LeaderID:        rep.LeaderID,
-		Significant:     rep.Significant,
-		RetainedSeconds: domain.RetainedSeconds,
+		Experiment:         h.toExperimentDTO(rep.Experiment),
+		Variants:           make([]reportVariantDTO, 0, len(rep.Variants)),
+		LeaderID:           rep.LeaderID,
+		Significant:        rep.Significant,
+		RetainedSeconds:    domain.RetainedSeconds,
+		Allocation:         "thompson",
+		AutoWinProb:        rep.AutoWinProb,
+		AutoMinTrials:      rep.AutoMinTrials,
+		AutoMinRivalTrials: rep.AutoMinRivalTrials,
 	}
 	for _, v := range rep.Variants {
 		out.Variants = append(out.Variants, reportVariantDTO{
@@ -182,5 +200,7 @@ func toStatsDTO(st domain.VariantStats) variantStatsDTO {
 		ErrorRate:      st.ErrorRate,
 		CompletionRate: st.CompletionRate,
 		WinRate:        st.WinRate,
+		TrafficShare:   st.TrafficShare,
+		ProbBest:       st.ProbBest,
 	}
 }
