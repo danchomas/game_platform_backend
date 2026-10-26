@@ -368,3 +368,63 @@
     gap: 10px;
   }
 }
+.bandit-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.bandit-rows {
+  display: grid;
+  gap: 12px;
+  padding: 18px 22px 22px;
+}
+.bandit-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 180px) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+.bandit-legend {
+  font-size: 9px;
+  color: #9aaa86;
+}
+.bandit-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 10px;
+  height: 6px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.bandit-meter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+}
+.swatch.share,
+.retention-track b.share {
+  background: #b9c79f;
+}
+.swatch.prob,
+.retention-track b.prob {
+  background: #7d8865;
+}
+.retention-track b.prob.leader {
+  background: #e0bf4f;
+}
+@media (max-width: 620px) {
+  .bandit-row {
+    grid-template-columns: 54px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+  .bandit-meter {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bandit-meter .retention-value {
+    text-align: left;
+  }
+}

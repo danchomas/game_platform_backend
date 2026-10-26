@@ -1,8 +1,11 @@
-import { Trophy } from 'lucide-react';
+import { Trophy, Shuffle } from 'lucide-react';
 import { formatNumber, percent, duration } from '../../../shared/lib/format';
 import { EmptyState } from '../../../shared/ui/EmptyState';
 
-/** Dashboard of a live experiment: retention with confidence intervals and the per-variant funnel. */
+/**
+ * Dashboard of a live experiment: who the bandit favours, retention with confidence
+ * intervals and the per-variant funnel.
+ */
 export function ExperimentReport({ report, busy, onChooseWinner }) {
   if (!report) {
     return null;
@@ -18,10 +21,16 @@ export function ExperimentReport({ report, busy, onChooseWinner }) {
         leader={leader}
         significant={significant}
         threshold={report.retained_seconds}
-        finished={experiment.status === 'finished'}
+        experiment={experiment}
       />
       {shown.length ? (
         <>
+          <BanditPanel
+            variants={variants}
+            leaderId={leaderId}
+            winnerId={experiment.winner_id}
+            rule={report}
+          />
           <RetentionChart
             variants={variants}
             leaderId={leaderId}
@@ -48,31 +57,110 @@ export function ExperimentReport({ report, busy, onChooseWinner }) {
   );
 }
 
-function LeaderBanner({ leader, significant, threshold, finished }) {
-  if (!leader) {
+function LeaderBanner({ leader, significant, threshold, experiment }) {
+  const finished = experiment.status === 'finished';
+  const winner = finished ? experiment.winner_id : '';
+  if (!leader && !winner) {
     return null;
   }
+  if (winner) {
+    const auto = experiment.winner_source === 'auto';
+    return (
+      <div className="panel leader-banner significant">
+        <Trophy size={20} />
+        <div>
+          <strong>
+            {auto ? 'Бандит выбрал победителя автоматически' : 'Победитель выбран вручную'}
+          </strong>
+          <span>Ссылка эксперимента теперь отдаёт всем игрокам только эту игру.</span>
+        </div>
+      </div>
+    );
+  }
   const { stats } = leader;
-  let verdict = 'Данных пока мало: интервалы вариантов пересекаются, лидер может смениться.';
-  if (significant) {
-    verdict = 'Разница значимая: можно выбирать победителя.';
-  }
-  if (finished) {
-    verdict = 'Эксперимент завершён, ссылка отдаёт победителя.';
-  }
+  const verdict = significant
+    ? 'Порог автопобеды набран: эксперимент завершится при следующем заходе.'
+    : 'Лидер может смениться: бандит продолжает подбирать варианты для новых игроков.';
   return (
     <div className={`panel leader-banner ${significant ? 'significant' : ''}`}>
       <Trophy size={20} />
       <div>
         <strong>
-          Лидирует вариант {leader.label}: {percent(stats.retention_rate)} показов доиграли до{' '}
-          {threshold} с
+          Лидирует вариант {leader.label}: лучший с вероятностью {percent(stats.prob_best)}
         </strong>
         <span>
-          95% интервал: {percent(stats.retention_low)}–{percent(stats.retention_high)}. {verdict}
+          {percent(stats.retention_rate)} показов доиграли до {threshold} с (95% интервал{' '}
+          {percent(stats.retention_low)}–{percent(stats.retention_high)}). {verdict}
         </span>
       </div>
     </div>
+  );
+}
+
+// Thompson sampling sends new players where P(best) is high, so the two bars should converge.
+function BanditPanel({ variants, leaderId, winnerId, rule }) {
+  return (
+    <div className="panel bandit-panel">
+      <div className="panel-title">
+        <div>
+          <h2>
+            <Shuffle size={14} /> Распределение: Thompson sampling
+          </h2>
+          <p>
+            Новых игроков чаще получает вариант, который вероятнее лучший; вернувшийся игрок
+            остаётся в своём. Эксперимент завершится сам, когда вариант будет лучшим с вероятностью{' '}
+            {percent(rule.auto_win_prob)}, у него наберётся {rule.auto_min_trials} завершённых
+            показов, а у остальных — хотя бы по {rule.auto_min_rival_trials}.
+          </p>
+        </div>
+      </div>
+      <div className="bandit-rows" role="list">
+        <div className="bandit-row bandit-legend" aria-hidden="true">
+          <span />
+          <span>
+            <i className="swatch share" /> Доля показов
+          </span>
+          <span>
+            <i className="swatch prob" /> Вероятность быть лучшим
+          </span>
+        </div>
+        {variants
+          .filter((variant) => variant.published && variant.version > 0)
+          .map((variant) => {
+            const { stats } = variant;
+            const highlighted = variant.game_id === (winnerId || leaderId);
+            return (
+              <div className="bandit-row" role="listitem" key={variant.game_id}>
+                <span className="retention-name">
+                  {variant.label}
+                  <small>{variant.title}</small>
+                </span>
+                <Meter
+                  className="share"
+                  value={stats.traffic_share}
+                  label={`Вариант ${variant.label}: ${percent(stats.traffic_share)} показов (${formatNumber(stats.exposures)})`}
+                />
+                <Meter
+                  className={`prob ${highlighted ? 'leader' : ''}`}
+                  value={stats.prob_best}
+                  label={`Вариант ${variant.label}: лучший с вероятностью ${percent(stats.prob_best)}`}
+                />
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+function Meter({ className, value, label }) {
+  return (
+    <span className="bandit-meter" title={label}>
+      <span className="retention-track">
+        <b className={className} style={{ width: percent(value) }} />
+      </span>
+      <span className="retention-value">{percent(value)}</span>
+    </span>
   );
 }
 
@@ -149,6 +237,8 @@ function FunnelTable({ variants, winnerId, canChoose, busy, onChooseWinner }) {
             <tr>
               <th>Вариант</th>
               <th>Показы</th>
+              <th>Доля</th>
+              <th>P(лучший)</th>
               <th>Загрузились</th>
               <th>Вовлеклись</th>
               <th>Удержались</th>
@@ -168,6 +258,8 @@ function FunnelTable({ variants, winnerId, canChoose, busy, onChooseWinner }) {
                     <strong className="funnel-variant">{variant.label}</strong> {variant.title}
                   </td>
                   <td>{formatNumber(stats.exposures)}</td>
+                  <td>{percent(stats.traffic_share)}</td>
+                  <td>{percent(stats.prob_best)}</td>
                   <td>{percent(stats.load_rate)}</td>
                   <td>{percent(stats.engagement_rate)}</td>
                   <td>{percent(stats.retention_rate)}</td>

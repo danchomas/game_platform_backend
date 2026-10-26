@@ -171,6 +171,7 @@ function ExperimentDetail({
             variant={variant}
             previewURL={previewURL}
             isWinner={variant.game_id === winnerId}
+            autoWinner={experiment.winner_source === 'auto'}
             isLeader={!winnerId && variant.game_id === report?.leader_id}
             onOpen={onOpenVariant}
           />

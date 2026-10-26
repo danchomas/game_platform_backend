@@ -4,7 +4,7 @@ import { GameStatus } from '../../games/components/GameStatus';
 import { isBusyStatus } from '../../games/pipelineStatus';
 import { formatCost } from '../experimentStatus';
 
-export function VariantCard({ variant, previewURL, isWinner, isLeader, onOpen }) {
+export function VariantCard({ variant, previewURL, isWinner, autoWinner, isLeader, onOpen }) {
   const [previewFailed, setPreviewFailed] = useState(false);
   const busy = isBusyStatus(variant.status);
   const showPreview = variant.version > 0 && !previewFailed;
@@ -25,7 +25,7 @@ export function VariantCard({ variant, previewURL, isWinner, isLeader, onOpen })
         <span className="variant-label">Вариант {variant.label}</span>
         {isWinner ? (
           <span className="variant-badge winner">
-            <Trophy size={12} /> Победитель
+            <Trophy size={12} /> {autoWinner ? 'Победитель (авто)' : 'Победитель'}
           </span>
         ) : (
           isLeader && <span className="variant-badge">Лидирует</span>
