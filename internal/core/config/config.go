@@ -21,6 +21,10 @@ const (
 	defaultMaxFixRounds     = 2
 	// low: на рассуждения уходит ~20% max_tokens, остальное — на ответ с кодом игры
 	defaultReasoning = "low"
+	// План короткий: обдумывание стоит секунды, а противоречия в замысле дороже всего
+	defaultPlannerReasoning  = "medium"
+	defaultReviewerReasoning = "low"
+	reviewOff                = "off"
 
 	defaultBrowserTimeoutSec  = 40
 	defaultBrowserMaxParallel = 2
@@ -44,7 +48,12 @@ type Config struct {
 	LLMMaxTokens   int
 	MaxFixRounds   int
 	// Reasoning — бюджет рассуждений «думающих» моделей: off, low, medium, high.
-	Reasoning string
+	// Для кодера и исправителя; у планировщика и ревьюера — свои.
+	Reasoning         string
+	PlannerReasoning  string
+	ReviewerReasoning string
+	// ReviewerModel — проверка логики кода по плану; пусто — проверка выключена (LLM_REVIEWER_MODEL=off).
+	ReviewerModel string
 
 	// BrowserWSURL — DevTools headless Chrome для теста игр; пусто — только статическая проверка.
 	BrowserWSURL       string
@@ -84,6 +93,12 @@ func Load() (Config, error) {
 	}
 
 	cfg.FixerModel = env("LLM_FIXER_MODEL", cfg.OpenRouterModel)
+	cfg.PlannerReasoning = strings.ToLower(env("LLM_PLANNER_REASONING", defaultPlannerReasoning))
+	cfg.ReviewerReasoning = strings.ToLower(env("LLM_REVIEWER_REASONING", defaultReviewerReasoning))
+	cfg.ReviewerModel = env("LLM_REVIEWER_MODEL", cfg.PlannerModel)
+	if strings.EqualFold(cfg.ReviewerModel, reviewOff) {
+		cfg.ReviewerModel = ""
+	}
 
 	return cfg, cfg.Validate()
 }
@@ -111,10 +126,14 @@ func (c Config) Validate() error {
 	if c.LLMMaxTokens < 1 {
 		return fmt.Errorf("LLM_MAX_TOKENS должен быть положительным, получено %d", c.LLMMaxTokens)
 	}
-	switch c.Reasoning {
-	case "off", "low", "medium", "high":
-	default:
-		return fmt.Errorf("LLM_REASONING: ожидается off, low, medium или high, получено %q", c.Reasoning)
+	for name, v := range map[string]string{
+		"LLM_REASONING": c.Reasoning, "LLM_PLANNER_REASONING": c.PlannerReasoning, "LLM_REVIEWER_REASONING": c.ReviewerReasoning,
+	} {
+		switch v {
+		case "off", "low", "medium", "high":
+		default:
+			return fmt.Errorf("%s: ожидается off, low, medium или high, получено %q", name, v)
+		}
 	}
 	if c.MaxFixRounds < 0 {
 		return fmt.Errorf("MAX_FIX_ROUNDS не может быть отрицательным, получено %d", c.MaxFixRounds)

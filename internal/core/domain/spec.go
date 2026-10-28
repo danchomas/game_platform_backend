@@ -1,30 +1,41 @@
 package domain
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // GameSpec — план игры, который агент составляет до написания кода
 // и который пользователь может поправить перед подтверждением.
 // json-теги здесь — формат обмена с моделью и хранения в JSONB, а не транспорт.
 type GameSpec struct {
-	Title         string     `json:"title"`
-	Genre         string     `json:"genre"`
-	Audience      string     `json:"audience"`
-	Language      string     `json:"language"`
-	Concept       string     `json:"concept"`
-	Goal          string     `json:"goal"`
-	CoreLoop      []string   `json:"core_loop"`
-	WinCondition  string     `json:"win_condition"`
-	LoseCondition string     `json:"lose_condition"`
-	Controls      Controls   `json:"controls"`
-	Difficulty    Difficulty `json:"difficulty"`
-	RoundSeconds  int        `json:"round_seconds"`
-	Levels        int        `json:"levels"`
-	UI            UISpec     `json:"ui"`
-	Visual        Visual     `json:"visual"`
-	Assets        []Asset    `json:"assets"`
-	Sounds        []string   `json:"sounds"`
-	Events        []string   `json:"events"`
-	Summary       string     `json:"summary"`
+	Title         string   `json:"title"`
+	Genre         string   `json:"genre"`
+	Audience      string   `json:"audience"`
+	Language      string   `json:"language"`
+	Concept       string   `json:"concept"`
+	Goal          string   `json:"goal"`
+	CoreLoop      []string `json:"core_loop"`
+	WinCondition  string   `json:"win_condition"`
+	LoseCondition string   `json:"lose_condition"`
+	Controls      Controls `json:"controls"`
+	// Camera, Mechanics, Tuning — замысел, который кодер реализует буквально, а ревьюер сверяет с кодом:
+	// без них модель сама додумывает вид и физику, и игра выходит противоречивой.
+	Camera    Camera   `json:"camera"`
+	Mechanics []string `json:"mechanics"`
+	// Tuning — ключевые числа механики в долях экрана и секундах; в коде — const TUNING.
+	Tuning map[string]float64 `json:"tuning"`
+	// Decisions — какой из вариантов запроса выбран и почему.
+	Decisions    []string   `json:"decisions"`
+	Difficulty   Difficulty `json:"difficulty"`
+	RoundSeconds int        `json:"round_seconds"`
+	Levels       int        `json:"levels"`
+	UI           UISpec     `json:"ui"`
+	Visual       Visual     `json:"visual"`
+	Assets       []Asset    `json:"assets"`
+	Sounds       []string   `json:"sounds"`
+	Events       []string   `json:"events"`
+	Summary      string     `json:"summary"`
 }
 
 type Controls struct {
@@ -34,6 +45,12 @@ type Controls struct {
 	// Buttons — только при Scheme "buttons": кнопки закрывают поле и играются хуже жестов.
 	Buttons     []string `json:"buttons"`
 	Description string   `json:"description"`
+}
+
+type Camera struct {
+	// side | top_down | behind | board | static
+	View        string `json:"view"`
+	Description string `json:"description"`
 }
 
 type Difficulty struct {
@@ -101,6 +118,26 @@ func (s *GameSpec) Normalize() {
 	if len(s.Assets) > 12 {
 		s.Assets = s.Assets[:12]
 	}
+	s.Camera.View = strings.ToLower(strings.TrimSpace(s.Camera.View))
+	s.Mechanics = clipList(s.Mechanics, 10, 300)
+	s.Decisions = clipList(s.Decisions, 5, 300)
+	for k, v := range s.Tuning {
+		if math.IsNaN(v) || math.IsInf(v, 0) || len(s.Tuning) > maxTuning {
+			delete(s.Tuning, k)
+		}
+	}
+}
+
+const maxTuning = 16
+
+func clipList(items []string, n, runes int) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if it = strings.TrimSpace(it); it != "" && len(out) < n {
+			out = append(out, clipRunes(it, runes))
+		}
+	}
+	return out
 }
 
 func clipRunes(s string, n int) string {

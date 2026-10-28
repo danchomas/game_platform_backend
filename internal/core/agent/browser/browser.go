@@ -133,15 +133,29 @@ func (t *Tester) Test(ctx context.Context, html string) (agent.TestReport, error
 		return rep, fmt.Errorf("загрузка игры: %w", err)
 	}
 
+	// Ошибка любого шага (обычно — таймаут теста) не должна превращаться в «нет кадров»
+	// или «не стартовала»: отчёт помечается незаконченным, и по нему не судят.
+	run := func(acts ...chromedp.Action) bool {
+		if rep.Incomplete != "" {
+			return false
+		}
+		if err := chromedp.Run(tab, acts...); err != nil {
+			rep.Incomplete = clip(err.Error(), 200)
+			return false
+		}
+		return true
+	}
 	var st qaState
-	shot0, _ := screenshot(tab)
-	_ = chromedp.Run(tab, chromedp.Evaluate(stateJS, &st))
+	readState := func() bool { return run(chromedp.Evaluate(stateJS, &st)) }
+
+	shot0 := shot(tab)
+	readState()
 	rep.FramesIdle = st.Raf
 	rafIdle := st.Raf
 
 	// старт: DOM-кнопка «Играть», иначе тап в центр, иначе тап ниже центра
 	var btn []float64
-	_ = chromedp.Run(tab, chromedp.Evaluate(findStartJS, &btn))
+	run(chromedp.Evaluate(findStartJS, &btn))
 	starts := []struct {
 		name string
 		x, y float64
@@ -154,24 +168,23 @@ func (t *Tester) Test(ctx context.Context, html string) (agent.TestReport, error
 	}
 	for _, s := range starts {
 		rep.StartMethod = s.name
-		_ = chromedp.Run(tab, tap(s.x, s.y), chromedp.Sleep(900*time.Millisecond), chromedp.Evaluate(stateJS, &st))
-		if st.Start > 0 {
+		if !run(tap(s.x, s.y), chromedp.Sleep(900*time.Millisecond)) || !readState() || st.Start > 0 {
 			break
 		}
 	}
 	rep.StartCalled = st.Start > 0
-	shot1, _ := screenshot(tab)
+	shot1 := shot(tab)
 	rep.ChangedOnStart = !bytes.Equal(shot0, shot1)
 
-	// геймплей: жесты и клавиши
+	// геймплей: жесты и клавиши; кадры считаются до снимков, которые могут быть медленными
 	rafStart := st.Raf
-	_ = chromedp.Run(tab,
+	run(
 		swipe(vw/2, vh/2, 120, 0), chromedp.Sleep(250*time.Millisecond),
 		tap(vw*0.3, vh*0.4), chromedp.Sleep(250*time.Millisecond),
 		swipe(vw/2, vh/2, 0, -120), chromedp.Sleep(250*time.Millisecond),
 	)
-	shot2, _ := screenshot(tab)
-	_ = chromedp.Run(tab,
+	shot2 := shot(tab)
+	run(
 		swipe(vw/2, vh/2, -120, 0), chromedp.Sleep(250*time.Millisecond),
 		tap(vw*0.7, vh*0.6), chromedp.Sleep(250*time.Millisecond),
 		hold(vw/2, vh*0.55, 500*time.Millisecond), chromedp.Sleep(200*time.Millisecond),
@@ -179,11 +192,13 @@ func (t *Tester) Test(ctx context.Context, html string) (agent.TestReport, error
 		key("ArrowLeft", 37), key("ArrowRight", 39), key(" ", 32),
 		chromedp.Sleep(400*time.Millisecond),
 	)
-	shot3, _ := screenshot(tab)
+	var cv canvasInfo
+	readState()
+	run(chromedp.Evaluate(canvasJS, &cv))
+	shot3 := shot(tab)
+	rep.ScreensCompared = shot1 != nil && shot2 != nil && shot3 != nil
 	rep.ChangedOnInput = !bytes.Equal(shot1, shot2) || !bytes.Equal(shot2, shot3)
 
-	var cv canvasInfo
-	_ = chromedp.Run(tab, chromedp.Evaluate(stateJS, &st), chromedp.Evaluate(canvasJS, &cv))
 	rep.FramesPlay = st.Raf - rafStart
 	if !rep.StartCalled {
 		rep.FramesPlay = st.Raf - rafIdle
@@ -193,7 +208,12 @@ func (t *Tester) Test(ctx context.Context, html string) (agent.TestReport, error
 	rep.Errors = formatErrors(st.Errors, html)
 	rep.EndCalls = st.Ends
 	rep.CustomEvents = st.Events
-	rep.Screenshot = shot3
+	for _, s := range [][]byte{shot3, shot2, shot1, shot0} {
+		if s != nil {
+			rep.Screenshot = s
+			break
+		}
+	}
 	rep.DurationMs = time.Since(start).Milliseconds()
 	return rep, nil
 }
@@ -246,14 +266,21 @@ type canvasInfo struct {
 	Colors int  `json:"colors"`
 }
 
-func screenshot(ctx context.Context) ([]byte, error) {
+// shotTimeout — снимок, не успевший за это время, пропускается: на нём держится только
+// сравнение «экран изменился», и он не должен съедать время всего теста.
+const shotTimeout = 5 * time.Second
+
+func shot(tab context.Context) []byte {
+	ctx, cancel := context.WithTimeout(tab, shotTimeout)
+	defer cancel()
 	var buf []byte
-	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		b, err := page.CaptureScreenshot().WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(55).Do(ctx)
+	_ = chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		b, err := page.CaptureScreenshot().WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(55).
+			WithOptimizeForSpeed(true).Do(ctx)
 		buf = b
 		return err
 	}))
-	return buf, err
+	return buf
 }
 
 func touch(typ input.TouchType, pts ...*input.TouchPoint) chromedp.Action {

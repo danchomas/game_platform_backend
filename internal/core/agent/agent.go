@@ -18,9 +18,11 @@ import (
 )
 
 type Models struct {
-	Planner   string
-	Coder     string
-	Fixer     string
+	Planner string
+	Coder   string
+	Fixer   string
+	// Reviewer — проверка логики кода по плану; пусто — без проверки.
+	Reviewer  string
 	Fallbacks []string
 	MaxTokens int
 }
@@ -29,8 +31,11 @@ type Config struct {
 	Models       Models
 	MaxFixRounds int
 	CallTimeout  time.Duration
-	// Reasoning — бюджет рассуждений «думающих» моделей (llm.Reasoning*), см. LLM_REASONING.
-	Reasoning string
+	// Reasoning — бюджет рассуждений «думающих» моделей (llm.Reasoning*) для кодера и исправителя.
+	// У планировщика и ревьюера свои: пусто — как у кодера.
+	Reasoning         string
+	PlannerReasoning  string
+	ReviewerReasoning string
 }
 
 type Agent struct {
@@ -52,6 +57,12 @@ func New(p llm.Provider, t Tester, cfg Config) *Agent {
 	}
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = 4 * time.Minute
+	}
+	if cfg.PlannerReasoning == "" {
+		cfg.PlannerReasoning = cfg.Reasoning
+	}
+	if cfg.ReviewerReasoning == "" {
+		cfg.ReviewerReasoning = cfg.Reasoning
 	}
 	return &Agent{llm: p, tester: t, cfg: cfg}
 }
@@ -100,11 +111,23 @@ type Stage func(status, detail string)
 // ответила, вызов повторяется один раз с выключенными рассуждениями.
 // w != nil — ответ идёт потоком, и его ход сообщается наружу.
 func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, w watcher, tr *Trace) (string, error) {
-	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, a.cfg.Reasoning, w, tr)
-	if errors.Is(err, llm.ErrEmptyTruncated) && a.cfg.Reasoning != llm.ReasoningOff {
+	reasoning := a.reasoningFor(role)
+	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, reasoning, w, tr)
+	if errors.Is(err, llm.ErrEmptyTruncated) && reasoning != llm.ReasoningOff {
 		return a.callOnce(ctx, role, model, msgs, temp, maxCont, llm.ReasoningOff, w, tr)
 	}
 	return text, err
+}
+
+func (a *Agent) reasoningFor(role string) string {
+	switch role {
+	case "planner":
+		return a.cfg.PlannerReasoning
+	case "reviewer":
+		return a.cfg.ReviewerReasoning
+	default:
+		return a.cfg.Reasoning
+	}
 }
 
 func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, w watcher, tr *Trace) (string, error) {
@@ -249,9 +272,16 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		planned = nil
 	}
 	var issues, earlier []domain.Issue
+	reviewNeeded := planned != nil && a.cfg.Models.Reviewer != ""
 	for round := 0; ; round++ {
 		if err := ctx.Err(); err != nil {
 			return BuildOutput{}, err
+		}
+		// ревьюер читает код параллельно с тестом в браузере: время сборки почти не растёт
+		var reviewed chan []domain.Issue
+		if reviewNeeded {
+			reviewed = make(chan []domain.Issue, 1)
+			go func(code string) { reviewed <- a.review(ctx, *planned, code, tr) }(html)
 		}
 		stage(domain.StatusValidating, "")
 		issues = Validate(html, planned)
@@ -266,6 +296,12 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 				issues = append(issues, rep.Issues()...)
 			}
 		}
+		if reviewed != nil {
+			logic := <-reviewed
+			issues = append(issues, logic...)
+			// повторно проверяем только то, что ревьюер уже находил: исправлено ли
+			reviewNeeded = domain.HasErrors(logic)
+		}
 		tr.Issues = withFixed(issues, earlier)
 
 		if !domain.HasErrors(issues) || round >= a.cfg.MaxFixRounds {
@@ -276,8 +312,7 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		blocking := errorsOnly(issues)
 		stage(domain.StatusFixing, fmt.Sprintf("круг %d: %s", round+1, issueCodes(blocking)))
 		tr.FixRounds++
-		fixed, ferr := a.code(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, blocking), 0.2,
-			in.Progress.watch("fixer", len(html)), tr)
+		fixed, ferr := a.fix(ctx, html, blocking, in.Progress, tr)
 		if ferr != nil {
 			if ctx.Err() != nil {
 				return BuildOutput{}, ctx.Err()
@@ -326,11 +361,99 @@ func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, te
 	return llm.Result{}, lastErr
 }
 
+const maxReviewIssues = 5
+
+// review — проверка логики кода по плану. Сбой ревьюера не мешает сборке: только предупреждение.
+func (a *Agent) review(ctx context.Context, spec domain.GameSpec, code string, tr *Trace) []domain.Issue {
+	raw, err := a.call(ctx, "reviewer", a.cfg.Models.Reviewer, llm.ReviewMessages(spec, code), 0.2, 0, nil, tr)
+	var out struct {
+		Issues []struct {
+			Severity string `json:"severity"`
+			Title    string `json:"title"`
+			Details  string `json:"details"`
+			Fix      string `json:"fix"`
+		} `json:"issues"`
+	}
+	if err == nil {
+		err = llm.ParseJSON(raw, &out)
+	}
+	if err != nil {
+		return []domain.Issue{{Code: "review_unavailable", Severity: domain.SevWarn, Message: "logic review failed: " + clipMsg(err.Error())}}
+	}
+	var issues []domain.Issue
+	for i, r := range out.Issues {
+		if i == maxReviewIssues {
+			break
+		}
+		sev := domain.SevWarn
+		if strings.EqualFold(r.Severity, string(domain.SevError)) {
+			sev = domain.SevError
+		}
+		msg := r.Title + ": " + r.Details
+		if r.Fix != "" {
+			msg += " Fix: " + r.Fix
+		}
+		issues = append(issues, domain.Issue{Code: fmt.Sprintf("logic_%d", i+1), Severity: sev, Message: clipMsg(msg)})
+	}
+	return issues
+}
+
+func clipMsg(s string) string {
+	if r := []rune(s); len(r) > 600 {
+		return string(r[:600]) + "…"
+	}
+	return s
+}
+
+// fixPatchChars — обычный объём правок исправителя, для полосы прогресса.
+const fixPatchChars = 3000
+
+// fix — круг исправления правками SEARCH/REPLACE; если они не легли на код,
+// один запасной вызов возвращает файл целиком (роль fixer_full в телеметрии).
+func (a *Agent) fix(ctx context.Context, html string, issues []domain.Issue, p Progress, tr *Trace) (llm.Result, error) {
+	raw, err := a.call(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, issues), 0.2, 1,
+		p.watch("fixer", fixPatchChars), tr)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	res, perr := applyFix(html, raw)
+	if perr == nil {
+		return res, nil
+	}
+	return a.code(ctx, "fixer_full", a.cfg.Models.Fixer, llm.FixFullMessages(html, issues, perr.Error()), 0.2,
+		p.watch("fixer", len(html)), tr)
+}
+
+func applyFix(html, raw string) (llm.Result, error) {
+	if strings.Contains(raw, "<game>") {
+		return parseGame(raw) // модель всё же прислала файл целиком — тоже годится
+	}
+	reply, edits, err := llm.ParseEdits(raw)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	patched, err := llm.ApplyEdits(html, edits)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	if !strings.Contains(strings.ToLower(patched), "</html>") {
+		return llm.Result{}, errors.New("после правок документ оборван")
+	}
+	if reply == "" {
+		reply = "Исправил найденные ошибки."
+	}
+	return checkGame(llm.Result{Reply: reply, HTML: patched})
+}
+
 func parseGame(raw string) (llm.Result, error) {
 	res, err := llm.Parse(raw)
 	if err != nil {
 		return llm.Result{}, fmt.Errorf("%w: %w", apperr.ErrLLMFailed, err)
 	}
+	return checkGame(res)
+}
+
+func checkGame(res llm.Result) (llm.Result, error) {
 	res.HTML = htmlguard.Sanitize(res.HTML)
 	if err := htmlguard.Validate(res.HTML); err != nil {
 		return llm.Result{}, err
