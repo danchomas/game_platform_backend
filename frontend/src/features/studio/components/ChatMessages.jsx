@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ArrowUpRight, Sparkles, Check } from 'lucide-react';
 import { GenerationSteps as Steps } from '../../../shared/ui/GenerationSteps';
-import { STATUS, describeProgress, getBuildSteps } from '../../games/pipelineStatus';
+import { STATUS, describeProgress, getBuildSteps, getReviewNote } from '../../games/pipelineStatus';
 import { useNow } from '../hooks/useNow';
 import { PlanCard } from './PlanCard';
 
@@ -65,6 +65,7 @@ export function ChatMessages({
   generating,
   stage,
   progress,
+  review,
   plan,
   onApprove,
 }) {
@@ -121,6 +122,12 @@ export function ChatMessages({
         ))
       )}
       {plan && !generating && <PlanCard plan={plan} busy={busy} onApprove={onApprove} />}
+      {review && !generating && (
+        <div className="review-note" role="status">
+          <span className="step-dot" />
+          {getReviewNote(review)}
+        </div>
+      )}
       {generating && (
         <div className="message assistant generating">
           <span className="message-avatar">

@@ -50,6 +50,9 @@ type PipelineRepository interface {
 type Agent interface {
 	Plan(ctx context.Context, in agent.PlanInput, tr *agent.Trace) (domain.GameSpec, error)
 	Build(ctx context.Context, in agent.BuildInput, stage agent.Stage, tr *agent.Trace) (agent.BuildOutput, error)
+	ReviewEnabled() bool
+	Review(ctx context.Context, spec domain.GameSpec, html string, tr *agent.Trace) ([]domain.Issue, error)
+	Improve(ctx context.Context, html string, issues []domain.Issue, tr *agent.Trace) (agent.BuildOutput, error)
 }
 
 type InsightProvider interface {

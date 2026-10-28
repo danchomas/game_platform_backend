@@ -167,7 +167,22 @@ type progressDTO struct {
 // statusWithGameDTO — ответ /status: после фоновой сборки клиенту нужна новая карточка игры.
 type statusWithGameDTO struct {
 	statusDTO
-	Game gameDTO `json:"game"`
+	// Review — фоновая проверка логики готовой игры; пока она идёт, игра доступна и правится
+	Review *reviewDTO `json:"review,omitempty"`
+	Game   gameDTO    `json:"game"`
+}
+
+type reviewDTO struct {
+	// Phase: reviewing — ревьюер читает код; improving — исправление и тест найденного
+	Phase     string `json:"phase"`
+	ElapsedMs int64  `json:"elapsed_ms"`
+}
+
+func toReviewDTO(r *domain.ReviewState) *reviewDTO {
+	if r == nil {
+		return nil
+	}
+	return &reviewDTO{Phase: r.Phase, ElapsedMs: time.Since(r.StartedAt).Milliseconds()}
 }
 
 type llmCallDTO struct {

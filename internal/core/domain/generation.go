@@ -29,6 +29,8 @@ const (
 	GenRevise = "revise"
 	GenBuild  = "build"
 	GenEdit   = "edit"
+	// GenReview — фоновая проверка логики готовой игры и, если нужно, её улучшение.
+	GenReview = "review"
 )
 
 // Итог запуска агента в таблице generations.
@@ -89,6 +91,18 @@ type BuildProgress struct {
 	// Step — последняя метка «// @step …» из кода, который пишет модель
 	Step string
 }
+
+// ReviewState — фоновая проверка готовой игры: идёт, пока игрок уже играет и может править.
+type ReviewState struct {
+	StartedAt time.Time
+	// Phase: reviewing — ревьюер читает код; improving — исправление и тест найденного
+	Phase string
+}
+
+const (
+	ReviewPhaseReviewing = "reviewing"
+	ReviewPhaseImproving = "improving"
+)
 
 // BuildEstimate — обычные длительность сборки и размер кода по прошлым удачным сборкам.
 type BuildEstimate struct {

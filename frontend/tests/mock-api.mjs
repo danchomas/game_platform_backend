@@ -42,7 +42,33 @@ function progress() {
   return { ...base, role: 'coder', phase_ms: writing, chars, expected_chars: EXPECTED_CHARS, step };
 }
 
-function startBuild(reply) {
+// After the first build the server reviews the game's logic in the background and may save a fix.
+const REVIEW_MS = Number(process.env.QA_REVIEW_MS || 8000);
+let reviewTimer = null;
+let reviewUntil = 0;
+
+function startReview() {
+  reviewUntil = Date.now() + REVIEW_MS;
+  reviewTimer = setTimeout(() => {
+    reviewUntil = 0;
+    game.version++;
+    messages.push({
+      role: 'assistant',
+      content:
+        'Ревьюер проверил логику игры и поправил:\n• Раунд не останавливался после проигрыша',
+      version: game.version,
+    });
+    versions.unshift({ version: game.version, instruction: 'автопроверка логики ревьюером' });
+  }, REVIEW_MS);
+}
+
+function stopReview() {
+  clearTimeout(reviewTimer);
+  reviewUntil = 0;
+}
+
+function startBuild(reply, review = false) {
+  stopReview();
   buildStartedAt = Date.now();
   game.status = 'generating';
   const stages = [
@@ -58,6 +84,9 @@ function startBuild(reply) {
         game.html = demoHTML({ ...DEMO_GAMES[0], title: game.title });
         messages.push({ role: 'assistant', content: reply, version: game.version });
         versions.unshift({ version: game.version, instruction: messages.at(-2)?.content || '' });
+        if (review) {
+          startReview();
+        }
       }
     }, at),
   );
@@ -122,7 +151,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url.pathname.endsWith('/approve') && req.method === 'POST') {
-    startBuild('Тестовый ответ API: игра собрана и проверена.');
+    startBuild('Тестовый ответ API: игра собрана и проверена.', true);
     json({ game }, 202);
     return;
   }
@@ -132,6 +161,10 @@ const server = http.createServer(async (req, res) => {
       status: game.status,
       version: game.version,
       progress: game.status === 'ready' ? undefined : progress(),
+      review:
+        reviewUntil > Date.now()
+          ? { phase: 'reviewing', elapsed_ms: REVIEW_MS - (reviewUntil - Date.now()) }
+          : undefined,
       game: { ...game, html: undefined },
     });
     return;

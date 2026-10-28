@@ -64,6 +64,7 @@ func (s *Service) DeleteGame(ctx context.Context, userID, gameID string) error {
 	if _, err := s.getOwnedGame(ctx, userID, gameID); err != nil {
 		return err
 	}
+	s.reviews.stop(gameID)
 	return s.repo.DeleteGame(ctx, gameID)
 }
 
@@ -111,6 +112,7 @@ func (s *Service) RestoreVersion(ctx context.Context, userID, gameID string, ver
 		return domain.Game{}, "", 0, err
 	}
 
+	s.reviews.stop(gameID) // откат пользователя важнее фоновой проверки
 	reply := fmt.Sprintf("Восстановлена версия %d.", version)
 	newVersion, err := s.repo.AddVersion(ctx, domain.VersionInput{
 		GameID: gameID,

@@ -6,6 +6,7 @@ import {
   describeProgress,
   formatDuration,
   getBuildSteps,
+  getReviewNote,
   getStatusLabel,
   isBusyStatus,
   isPlanStage,
@@ -135,4 +136,10 @@ test('build progress: activity, percent and time left', () => {
 
   assert.equal(describeProgress(STATUS.generating, null), null);
   assert.equal(formatDuration(65_400), '1:05');
+});
+
+test('background review note', () => {
+  assert.equal(getReviewNote(null), '');
+  assert.match(getReviewNote({ phase: 'reviewing' }), /ваши правки важнее/);
+  assert.match(getReviewNote({ phase: 'improving' }), /исправляет/);
 });

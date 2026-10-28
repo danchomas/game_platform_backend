@@ -54,6 +54,7 @@ export function ChatPanel({
         generating={editor.generating}
         stage={editor.stage}
         progress={editor.progress}
+        review={editor.review}
         plan={editor.plan}
         onApprove={editor.approve}
       />
