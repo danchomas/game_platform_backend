@@ -351,7 +351,7 @@ func TestStatusShowsBuildProgressOnlyWhileBuilding(t *testing.T) {
 	}
 	<-ag.entered
 
-	_, p, err := svc.GetStatus(ctx, "owner-1", id)
+	_, p, _, err := svc.GetStatus(ctx, "owner-1", id)
 	if err != nil || p == nil {
 		t.Fatalf("во время сборки нужен прогресс: %v %v", p, err)
 	}
@@ -370,7 +370,7 @@ func TestStatusShowsBuildProgressOnlyWhileBuilding(t *testing.T) {
 
 	close(ag.block)
 	svc.Wait()
-	if _, p, _ := svc.GetStatus(ctx, "owner-1", id); p != nil {
+	if _, p, _, _ := svc.GetStatus(ctx, "owner-1", id); p != nil {
 		t.Errorf("после сборки прогресса быть не должно: %+v", *p)
 	}
 }
@@ -528,5 +528,108 @@ func TestRestoreVersionAppendsNewVersion(t *testing.T) {
 	}
 	if !strings.Contains(restored.HTML, "let v1;") {
 		t.Error("откат вернул не тот код")
+	}
+}
+
+func buildWithReviewer(t *testing.T, ag *fakeAgent) (*fakeRepo, *Service, string) {
+	t.Helper()
+	repo := newFakeRepo()
+	svc := newTestService(repo, ag)
+	ctx := context.Background()
+	game, _, err := svc.CreateGame(ctx, "owner-1", "раннер", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApprovePlan(ctx, "owner-1", game.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	return repo, svc, game.ID
+}
+
+var laneBug = []domain.Issue{{Code: "logic_1", Severity: domain.SevError, Message: "Полосы при виде сбоку: draw() рисует 3 полосы"}}
+
+func TestReviewerImprovesTheGameInTheBackground(t *testing.T) {
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let v1;"), reviewOn: true,
+		reviewIssues: laneBug, improvedHTML: gameHTML("let v2;")}
+	repo, svc, id := buildWithReviewer(t, ag)
+	svc.Wait()
+
+	g := repo.game(id)
+	if g.Version != 2 || g.HTML != gameHTML("let v2;") || g.Status != domain.StatusReady {
+		t.Fatalf("улучшенная версия не сохранена: v%d %q", g.Version, g.Status)
+	}
+	msgs, _ := repo.Messages(context.Background(), id)
+	if last := msgs[len(msgs)-1].Content; !strings.Contains(last, "Ревьюер") || !strings.Contains(last, "Полосы при виде сбоку") {
+		t.Errorf("в чате нет сообщения ревьюера: %q", last)
+	}
+	gen, _ := repo.lastGen(domain.GenReview)
+	if gen.Status != domain.GenStatusReady || gen.Version == nil || *gen.Version != 2 {
+		t.Errorf("проверка записана неверно: %+v", gen)
+	}
+}
+
+func TestReviewerWarningsDoNotChangeTheGame(t *testing.T) {
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let v1;"), reviewOn: true,
+		reviewIssues: []domain.Issue{{Code: "logic_1", Severity: domain.SevWarn, Message: "можно сбалансировать"}}}
+	repo, svc, id := buildWithReviewer(t, ag)
+	svc.Wait()
+	if g := repo.game(id); g.Version != 1 {
+		t.Fatalf("из-за предупреждений версия меняться не должна: v%d", g.Version)
+	}
+	if gen, _ := repo.lastGen(domain.GenReview); gen.Status != domain.GenStatusWithIssues {
+		t.Errorf("статус проверки: %q", gen.Status)
+	}
+}
+
+func TestUserEditCancelsTheReview(t *testing.T) {
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let v1;"), reviewOn: true,
+		reviewIssues: laneBug, improvedHTML: gameHTML("let reviewer;"),
+		reviewGate: make(chan struct{}), reviewing: make(chan struct{}, 1)}
+	repo, svc, id := buildWithReviewer(t, ag)
+	ctx := context.Background()
+	<-ag.reviewing // первая сборка готова, ревьюер работает
+
+	_, _, review, err := svc.GetStatus(ctx, "owner-1", id)
+	if err != nil || review == nil || review.Phase != domain.ReviewPhaseReviewing {
+		t.Fatalf("статус должен показывать идущую проверку: %+v %v", review, err)
+	}
+	if g := repo.game(id); g.Status != domain.StatusReady || g.Version != 1 {
+		t.Fatalf("пока идёт проверка, игра доступна: %q v%d", g.Status, g.Version)
+	}
+
+	ag.mu.Lock()
+	ag.html = gameHTML("let user;")
+	ag.mu.Unlock()
+	if _, err := svc.IterateGame(ctx, "owner-1", id, "сделай медленнее"); err != nil {
+		t.Fatalf("правка во время проверки не должна ждать ревьюера: %v", err)
+	}
+	svc.Wait()
+
+	g := repo.game(id)
+	if g.Version != 2 || g.HTML != gameHTML("let user;") {
+		t.Fatalf("правка пользователя должна победить ревьюера: v%d %q", g.Version, g.HTML)
+	}
+	if gen, _ := repo.lastGen(domain.GenReview); gen.Status != domain.GenStatusFailed {
+		t.Errorf("отменённая проверка должна быть записана как прерванная: %+v", gen)
+	}
+	if _, _, review, _ := svc.GetStatus(ctx, "owner-1", id); review != nil {
+		t.Errorf("после отмены проверки в статусе быть не должно: %+v", review)
+	}
+}
+
+func TestReviewResultIsDroppedIfTheGameChanged(t *testing.T) {
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("let v1;"), reviewOn: true,
+		reviewIssues: laneBug, improvedHTML: gameHTML("let reviewer;"),
+		reviewGate: make(chan struct{}), reviewing: make(chan struct{}, 1)}
+	repo, svc, id := buildWithReviewer(t, ag)
+	<-ag.reviewing
+	// версия сменилась в обход сервиса (другой процесс): улучшение старой версии не применяется
+	if _, err := repo.AddVersion(context.Background(), domain.VersionInput{GameID: id, Reply: "x", HTML: gameHTML("let other;")}); err != nil {
+		t.Fatal(err)
+	}
+	close(ag.reviewGate)
+	svc.Wait()
+	if g := repo.game(id); g.Version != 2 || g.HTML != gameHTML("let other;") {
+		t.Fatalf("улучшение устаревшей версии не должно сохраняться: v%d %q", g.Version, g.HTML)
 	}
 }

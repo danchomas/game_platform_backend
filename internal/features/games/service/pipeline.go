@@ -146,6 +146,7 @@ func (s *Service) IterateGame(ctx context.Context, userID, gameID, instruction s
 		return domain.Game{}, apperr.ErrNotGenerated
 	}
 
+	s.reviews.stop(gameID) // правка пользователя важнее фоновой проверки
 	ok, err := s.repo.TrySetStatus(ctx, gameID, domain.StatusGenerating, []string{domain.StatusReady})
 	if err != nil {
 		return domain.Game{}, err
@@ -324,6 +325,10 @@ func (s *Service) runBuild(ctx context.Context, gameID, kind, instruction string
 	}
 	res.Version = &version
 	s.finishGen(wctx, res)
+	// первая сборка уходит на фоновую проверку логики; игрок уже играет и может править
+	if kind == domain.GenBuild && g.ExperimentID == "" {
+		s.startReview(gameID, version, specOf(g))
+	}
 	s.setStatus(wctx, gameID, domain.StatusReady, detail, version)
 }
 
@@ -437,17 +442,18 @@ func (s *Service) Subscribe(ctx context.Context, userID, gameID string) (domain.
 	return g, ch, cancel, nil
 }
 
-// GetStatus — игра без HTML и, пока идёт сборка, её ход.
-func (s *Service) GetStatus(ctx context.Context, userID, gameID string) (domain.Game, *domain.BuildProgress, error) {
+// GetStatus — игра без HTML; пока идёт сборка — её ход, пока идёт фоновая проверка — её состояние.
+func (s *Service) GetStatus(ctx context.Context, userID, gameID string) (domain.Game, *domain.BuildProgress, *domain.ReviewState, error) {
 	g, err := s.getOwnedGame(ctx, userID, gameID)
 	if err != nil {
-		return domain.Game{}, nil, err
+		return domain.Game{}, nil, nil, err
 	}
 	g.HTML = ""
+	review := s.reviews.get(gameID)
 	if !domain.Busy(g.Status) {
-		return g, nil, nil
+		return g, nil, review, nil
 	}
-	return g, s.progress.get(gameID), nil
+	return g, s.progress.get(gameID), review, nil
 }
 
 func (s *Service) ListGenerations(ctx context.Context, userID, gameID string) ([]domain.Generation, error) {

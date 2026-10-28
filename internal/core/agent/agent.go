@@ -272,36 +272,11 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		planned = nil
 	}
 	var issues, earlier []domain.Issue
-	reviewNeeded := planned != nil && a.cfg.Models.Reviewer != ""
 	for round := 0; ; round++ {
 		if err := ctx.Err(); err != nil {
 			return BuildOutput{}, err
 		}
-		// ревьюер читает код параллельно с тестом в браузере: время сборки почти не растёт
-		var reviewed chan []domain.Issue
-		if reviewNeeded {
-			reviewed = make(chan []domain.Issue, 1)
-			go func(code string) { reviewed <- a.review(ctx, *planned, code, tr) }(html)
-		}
-		stage(domain.StatusValidating, "")
-		issues = Validate(html, planned)
-
-		if a.tester != nil {
-			stage(domain.StatusTesting, "")
-			rep, terr := a.tester.Test(ctx, gamekit.Embed(html))
-			if terr != nil {
-				issues = append(issues, domain.Issue{Code: "test_unavailable", Severity: domain.SevWarn, Message: "browser test failed to run: " + terr.Error()})
-			} else {
-				tr.Report = &rep
-				issues = append(issues, rep.Issues()...)
-			}
-		}
-		if reviewed != nil {
-			logic := <-reviewed
-			issues = append(issues, logic...)
-			// повторно проверяем только то, что ревьюер уже находил: исправлено ли
-			reviewNeeded = domain.HasErrors(logic)
-		}
+		issues = a.check(ctx, html, planned, stage, tr)
 		tr.Issues = withFixed(issues, earlier)
 
 		if !domain.HasErrors(issues) || round >= a.cfg.MaxFixRounds {
@@ -361,11 +336,37 @@ func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, te
 	return llm.Result{}, lastErr
 }
 
+// check — статические проверки и тест в браузере.
+func (a *Agent) check(ctx context.Context, html string, planned *domain.GameSpec, stage Stage, tr *Trace) []domain.Issue {
+	stage(domain.StatusValidating, "")
+	issues := Validate(html, planned)
+	if a.tester == nil {
+		return issues
+	}
+	stage(domain.StatusTesting, "")
+	rep, err := a.tester.Test(ctx, gamekit.Embed(html))
+	if err != nil {
+		return append(issues, domain.Issue{Code: "test_unavailable", Severity: domain.SevWarn, Message: "browser test failed to run: " + err.Error()})
+	}
+	tr.Report = &rep
+	return append(issues, rep.Issues()...)
+}
+
+// ReviewEnabled — настроен ли ревьюер логики.
+func (a *Agent) ReviewEnabled() bool { return a.cfg.Models.Reviewer != "" }
+
 const maxReviewIssues = 5
 
-// review — проверка логики кода по плану. Сбой ревьюера не мешает сборке: только предупреждение.
-func (a *Agent) review(ctx context.Context, spec domain.GameSpec, code string, tr *Trace) []domain.Issue {
-	raw, err := a.call(ctx, "reviewer", a.cfg.Models.Reviewer, llm.ReviewMessages(spec, code), 0.2, 0, nil, tr)
+// Review — проверка логики готовой игры по плану. Идёт в фоне после сборки,
+// поэтому медленная модель ревьюера не задерживает игрока. html — со встроенным GameKit или без.
+func (a *Agent) Review(ctx context.Context, spec domain.GameSpec, html string, tr *Trace) ([]domain.Issue, error) {
+	if !a.ReviewEnabled() {
+		return nil, nil
+	}
+	raw, err := a.call(ctx, "reviewer", a.cfg.Models.Reviewer, llm.ReviewMessages(spec, gamekit.Strip(html)), 0.2, 0, nil, tr)
+	if err != nil {
+		return nil, err
+	}
 	var out struct {
 		Issues []struct {
 			Severity string `json:"severity"`
@@ -374,11 +375,8 @@ func (a *Agent) review(ctx context.Context, spec domain.GameSpec, code string, t
 			Fix      string `json:"fix"`
 		} `json:"issues"`
 	}
-	if err == nil {
-		err = llm.ParseJSON(raw, &out)
-	}
-	if err != nil {
-		return []domain.Issue{{Code: "review_unavailable", Severity: domain.SevWarn, Message: "logic review failed: " + clipMsg(err.Error())}}
+	if err := llm.ParseJSON(raw, &out); err != nil {
+		return nil, fmt.Errorf("%w: ответ ревьюера не разобран: %w", apperr.ErrLLMFailed, err)
 	}
 	var issues []domain.Issue
 	for i, r := range out.Issues {
@@ -395,7 +393,30 @@ func (a *Agent) review(ctx context.Context, spec domain.GameSpec, code string, t
 		}
 		issues = append(issues, domain.Issue{Code: fmt.Sprintf("logic_%d", i+1), Severity: sev, Message: clipMsg(msg)})
 	}
-	return issues
+	return issues, nil
+}
+
+// ErrNotImproved — правки ревьюера сломали игру (тест нашёл ошибки): улучшение отбрасывается,
+// рабочая версия важнее.
+var ErrNotImproved = errors.New("исправление по замечаниям ревьюера не прошло проверку")
+
+// Improve исправляет ошибки, найденные ревьюером, одним кругом правок и проверяет игру снова.
+// Возвращает новую версию, только если она не хуже прежней.
+func (a *Agent) Improve(ctx context.Context, html string, issues []domain.Issue, tr *Trace) (BuildOutput, error) {
+	current := gamekit.Strip(html)
+	tr.FixRounds++
+	fixed, err := a.fix(ctx, current, errorsOnly(issues), nil, tr)
+	if err != nil {
+		return BuildOutput{}, err
+	}
+	code := gamekit.Strip(fixed.HTML)
+	after := a.check(ctx, code, nil, func(string, string) {}, tr)
+	tr.Issues = withFixed(after, issues)
+	if domain.HasErrors(after) {
+		return BuildOutput{Issues: after}, ErrNotImproved
+	}
+	fixed.HTML = gamekit.Embed(code)
+	return BuildOutput{HTML: fixed.HTML, Result: fixed, Issues: after}, nil
 }
 
 func clipMsg(s string) string {

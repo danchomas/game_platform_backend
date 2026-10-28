@@ -156,6 +156,16 @@ export function describeProgress(stage, progress, now = Date.now()) {
   };
 }
 
+// The server checks the finished game's logic in the background; the player can already play and edit.
+export function getReviewNote(review) {
+  if (!review) {
+    return '';
+  }
+  return review.phase === 'improving'
+    ? 'Ревьюер нашёл ошибки в логике и исправляет их — новая версия появится сама.'
+    : 'Ревьюер проверяет логику игры. Можно играть и править — ваши правки важнее.';
+}
+
 export function parseSpec(spec) {
   if (!spec) {
     return null;

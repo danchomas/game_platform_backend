@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -304,50 +305,52 @@ func reviewAgent(l llm.Provider, t Tester) *Agent {
 	})
 }
 
-const lanesInSideView = `{"issues":[{"severity":"error","title":"lanes in a side view","details":"draw() uses lane = 0..2 while the plan says side view","fix":"remove lanes, move along X"}]}`
+const lanesInSideView = `{"issues":[{"severity":"error","title":"Полосы при виде сбоку","details":"draw() uses lane = 0..2 while the plan says side view","fix":"remove lanes, move along X"},{"severity":"warn","title":"баланс","details":"x","fix":"y"}]}`
 
-func TestReviewerLogicErrorsGoToFixerAndAreRechecked(t *testing.T) {
-	var sentToFixer string
-	l := &scriptLLM{answers: []string{wrap(goodGame), lanesInSideView, wrap(goodGame), `{"issues":[]}`},
-		fn: func(r llm.Request) {
-			if r.Model == "fixer" {
-				sentToFixer = r.Messages[len(r.Messages)-1].Content
-			}
-		}}
-	tr := &Trace{}
-	out, err := reviewAgent(l, &fakeTester{reports: []TestReport{okReport}}).Build(context.Background(),
-		BuildInput{Prompt: "раннер", Spec: &domain.GameSpec{Camera: domain.Camera{View: "side"}}}, nil, tr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if callRoles(tr) != "coder,reviewer,fixer,reviewer" || domain.HasErrors(out.Issues) {
-		t.Fatalf("roles=%s issues=%+v", callRoles(tr), out.Issues)
-	}
-	if !strings.Contains(sentToFixer, "logic_1") || !strings.Contains(sentToFixer, "lanes in a side view") {
-		t.Fatalf("logic issue did not reach the fixer: %s", sentToFixer)
-	}
-}
-
-func TestBrokenReviewerDoesNotBlockTheBuild(t *testing.T) {
-	l := &scriptLLM{answers: []string{wrap(goodGame), "not json at all"}}
-	tr := &Trace{}
-	out, err := reviewAgent(l, &fakeTester{reports: []TestReport{okReport}}).Build(context.Background(),
-		BuildInput{Prompt: "x", Spec: &domain.GameSpec{}}, nil, tr)
-	if err != nil || domain.HasErrors(out.Issues) || tr.FixRounds != 0 {
-		t.Fatalf("err=%v rounds=%d issues=%+v", err, tr.FixRounds, out.Issues)
-	}
-	if callRoles(tr) != "coder,reviewer" || out.Issues[0].Code != "review_unavailable" {
-		t.Fatalf("roles=%s issues=%+v", callRoles(tr), out.Issues)
-	}
-}
-
-func TestEditIsNotReviewedAgainstThePlan(t *testing.T) {
+func TestBuildDoesNotWaitForTheReviewer(t *testing.T) {
 	l := &scriptLLM{answers: []string{wrap(goodGame)}}
 	tr := &Trace{}
-	_, err := reviewAgent(l, nil).Build(context.Background(),
-		BuildInput{Prompt: "x", Spec: &domain.GameSpec{}, CurrentHTML: goodGame, Instruction: "сделай полосы"}, nil, tr)
-	if err != nil || callRoles(tr) != "coder" {
+	if _, err := reviewAgent(l, &fakeTester{reports: []TestReport{okReport}}).Build(context.Background(),
+		BuildInput{Prompt: "x", Spec: &domain.GameSpec{}}, nil, tr); err != nil {
+		t.Fatal(err)
+	}
+	if callRoles(tr) != "coder" {
+		t.Fatalf("the reviewer runs in the background after the build, got %s", callRoles(tr))
+	}
+}
+
+func TestReviewReturnsLogicIssues(t *testing.T) {
+	var sent string
+	l := &scriptLLM{answers: []string{lanesInSideView}, fn: func(r llm.Request) { sent = r.Messages[1].Content }}
+	issues, err := reviewAgent(l, nil).Review(context.Background(), domain.GameSpec{Camera: domain.Camera{View: "side"}}, gamekit.Embed(goodGame), &Trace{})
+	if err != nil || len(issues) != 2 {
+		t.Fatalf("issues=%+v err=%v", issues, err)
+	}
+	if issues[0].Code != "logic_1" || issues[0].Severity != domain.SevError || issues[1].Severity != domain.SevWarn {
+		t.Fatalf("unexpected issues: %+v", issues)
+	}
+	if strings.Contains(sent, `data-gamekit`) || !strings.Contains(sent, `"view": "side"`) {
+		t.Fatal("the reviewer must get the plan and the code without GameKit")
+	}
+	if _, err := reviewAgent(&scriptLLM{answers: []string{"not json"}}, nil).Review(context.Background(), domain.GameSpec{}, goodGame, &Trace{}); err == nil {
+		t.Fatal("a broken reviewer answer must be an error")
+	}
+}
+
+func TestImproveKeepsTheGameOnlyIfItStillWorks(t *testing.T) {
+	issues := []domain.Issue{{Code: "logic_1", Severity: domain.SevError, Message: "x"}}
+	tr := &Trace{}
+	out, err := reviewAgent(&scriptLLM{answers: []string{wrap(goodGame)}}, &fakeTester{reports: []TestReport{okReport}}).
+		Improve(context.Background(), gamekit.Embed(goodGame), issues, tr)
+	if err != nil || !strings.Contains(out.HTML, `data-gamekit="1"`) || callRoles(tr) != "fixer" {
 		t.Fatalf("err=%v roles=%s", err, callRoles(tr))
+	}
+
+	broken := TestReport{Errors: []string{"TypeError: x"}, StartCalled: true, FramesPlay: 30}
+	_, err = reviewAgent(&scriptLLM{answers: []string{wrap(goodGame)}}, &fakeTester{reports: []TestReport{broken}}).
+		Improve(context.Background(), goodGame, issues, &Trace{})
+	if !errors.Is(err, ErrNotImproved) {
+		t.Fatalf("a fix that breaks the game must be dropped, got %v", err)
 	}
 }
 
@@ -359,6 +362,9 @@ func TestEachRoleGetsItsOwnReasoning(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := a.Build(context.Background(), BuildInput{Prompt: "x", Spec: &spec}, nil, &Trace{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Review(context.Background(), spec, goodGame, &Trace{}); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{"planner": llm.ReasoningMedium, "coder": llm.ReasoningOff, "reviewer": llm.ReasoningLow}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getDemoMessages } from '../../../demo/messages.js';
 import { renderDemoGame } from '../../../demo/renderDemoGame.js';
 import { download } from '../../../shared/lib/download.js';
@@ -8,6 +8,8 @@ import { STATUS, isBusyStatus, isPlanStage, parseSpec } from '../../games/pipeli
 
 const POLL_INTERVAL_MS = 1500;
 const BUILD_TIMEOUT_MS = 10 * 60_000;
+// The background review is slow and not urgent: poll it rarely.
+const REVIEW_POLL_MS = 4000;
 
 // Thrown when the editor switched to another game while a build was being awaited.
 const SUPERSEDED = Symbol('superseded');
@@ -31,6 +33,11 @@ export function useGameEditor({
   const [plan, setPlan] = useState(null);
   const [stage, setStage] = useState(null);
   const [progress, setProgress] = useState(null);
+  const [review, setReview] = useState(null);
+  const versionRef = useRef(0);
+  useEffect(() => {
+    versionRef.current = game?.version || 0;
+  }, [game]);
   const [options, setOptions] = useState({
     speed: 5,
     large: true,
@@ -56,6 +63,61 @@ export function useGameEditor({
     setPlan(null);
     setStage(null);
     setProgress(null);
+    setReview(null);
+  }
+
+  // Follows the server's background review of a finished game without blocking the editor:
+  // a version the reviewer saved is loaded unless the user is busy with their own request.
+  function watchReview(gameId, initial) {
+    const session = editorSession.current;
+    setReview(initial);
+    void (async () => {
+      for (;;) {
+        await delay(REVIEW_POLL_MS);
+        if (session !== editorSession.current) {
+          return;
+        }
+        let status;
+        try {
+          status = await api.getStatus(gameId);
+        } catch {
+          setReview(null);
+          return;
+        }
+        if (session !== editorSession.current) {
+          return;
+        }
+        const reviewed = status.game;
+        if (!operationLock.current && reviewed && reviewed.version > versionRef.current) {
+          await loadReviewed(reviewed, session);
+        }
+        if (!status.review) {
+          setReview(null);
+          return;
+        }
+        setReview(status.review);
+      }
+    })();
+  }
+
+  async function loadReviewed(reviewed, session) {
+    try {
+      const [source, history] = await Promise.all([
+        api.getGameHTML(reviewed.id),
+        api.getMessages(reviewed.id),
+      ]);
+      if (session !== editorSession.current || operationLock.current) {
+        return;
+      }
+      setGame(reviewed);
+      setSourceHTML(source);
+      setMessages((history || []).map(getVisibleMessage));
+      await reloadVersions(reviewed.id);
+      onChanged();
+      notify(`Ревьюер проверил логику и поправил игру — загружена версия ${reviewed.version}.`);
+    } catch {
+      // the next poll retries; the current version keeps working
+    }
   }
 
   // The ref locks synchronously, including two clicks before React has rendered the busy state.
@@ -131,6 +193,9 @@ export function useGameEditor({
     if (status.detail) {
       notify(status.detail);
     }
+    if (status.review) {
+      watchReview(nextGame.id, status.review);
+    }
   }
 
   async function followBuild(gameToFollow) {
@@ -184,6 +249,17 @@ export function useGameEditor({
     // A build started earlier (or in another tab) is still running: keep following it.
     if (opened && !isDemo && nextGame.owner_id === userId && isBusyStatus(nextGame.status)) {
       void followBuild(nextGame);
+    } else if (opened && !isDemo && nextGame.owner_id === userId && nextGame.version > 0) {
+      // the game may still be under the background review started after its build
+      const session = editorSession.current;
+      api
+        .getStatus(nextGame.id)
+        .then((status) => {
+          if (status.review && session === editorSession.current) {
+            watchReview(nextGame.id, status.review);
+          }
+        })
+        .catch(() => {});
     }
     return opened;
   }
@@ -314,6 +390,7 @@ export function useGameEditor({
     plan,
     stage,
     progress,
+    review,
     options,
     setOptions,
     busy,

@@ -298,6 +298,47 @@ type fakeAgent struct {
 	lastPlan  agent.PlanInput
 	lastBuild agent.BuildInput
 	builds    int
+
+	// фоновый ревьюер: reviewOn включает его; reviewIssues — что он находит;
+	// reviewGate != nil — Review ждёт закрытия канала или отмены (проверка отмены правкой)
+	reviewOn     bool
+	reviewIssues []domain.Issue
+	reviewGate   chan struct{}
+	reviewing    chan struct{}
+	improvedHTML string
+	improveErr   error
+	reviews      int
+}
+
+func (a *fakeAgent) ReviewEnabled() bool { return a.reviewOn }
+
+func (a *fakeAgent) Review(ctx context.Context, _ domain.GameSpec, _ string, tr *agent.Trace) ([]domain.Issue, error) {
+	a.mu.Lock()
+	a.reviews++
+	gate, started, issues := a.reviewGate, a.reviewing, a.reviewIssues
+	a.mu.Unlock()
+	if started != nil {
+		started <- struct{}{}
+	}
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	tr.Calls = append(tr.Calls, domain.LLMCall{Role: "reviewer", CostUSD: 0.002})
+	return issues, nil
+}
+
+func (a *fakeAgent) Improve(_ context.Context, _ string, _ []domain.Issue, tr *agent.Trace) (agent.BuildOutput, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr.Calls = append(tr.Calls, domain.LLMCall{Role: "fixer", CostUSD: 0.001})
+	if a.improveErr != nil {
+		return agent.BuildOutput{}, a.improveErr
+	}
+	return agent.BuildOutput{HTML: a.improvedHTML, Result: llm.Result{Reply: "поправил"}}, nil
 }
 
 func (a *fakeAgent) Plan(_ context.Context, in agent.PlanInput, tr *agent.Trace) (domain.GameSpec, error) {

@@ -187,10 +187,11 @@ Check ONLY these:
 5. Flow: start -> play -> result -> "play again" resets the whole state (score, speed, objects, timers).
 
 Do NOT report: code style, naming, performance, missing comments, visuals/colors, or anything about syntax/runtime errors.
-severity "error" only when a player would clearly notice broken, impossible or confusing gameplay; otherwise "warn". At most 5 issues, most important first. If everything is fine, return an empty list.
+severity "error" when a player would clearly notice broken, impossible or confusing gameplay. Always "error": the round goes on after it ended (objects still move, score/lives still change), "play again" does not reset the state, the round cannot be won or cannot be lost as the plan says, a gesture from the plan does nothing, the camera/movement contradicts the plan, obstacles that cannot be passed.
+"warn": balance that could be better, minor polish. At most 5 issues, most important first. If everything is fine, return an empty list.
 
 Return ONLY JSON (no markdown):
-{"issues": [{"severity": "error|warn", "title": "short name", "details": "what exactly happens in the code (name the functions/variables)", "fix": "the concrete change to make"}]}`
+{"issues": [{"severity": "error|warn", "title": "short name in the plan's language (shown to the player in the chat)", "details": "what exactly happens in the code (name the functions/variables)", "fix": "the concrete change to make"}]}`
 
 // ReviewMessages — план и код игры (без GameKit) для ревьюера.
 func ReviewMessages(spec domain.GameSpec, code string) []Msg {

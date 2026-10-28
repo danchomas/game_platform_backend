@@ -39,7 +39,9 @@
 
 ## Качество замысла
 - `domain.GameSpec` (план, JSON в `games.spec`): новые поля `camera {view, description}`, `mechanics[]`, `tuning{имя: число}`, `decisions[]`. Старые планы читаются как раньше. Фронт может показать их в карточке плана — сейчас там только `summary`.
-- Новая роль `reviewer` (по умолчанию модель планировщика): сверяет код с планом параллельно с тестом, ошибки — `logic_N` в `issues`. Переменные `LLM_PLANNER_REASONING`, `LLM_REVIEWER_MODEL`, `LLM_REVIEWER_REASONING` в compose.
+- Новая роль `reviewer` (по умолчанию модель планировщика) работает **в фоне после сборки** (`games/service/review.go`): игра сразу `ready`, ревьюер может найти ошибки и сохранить новую версию. На момент записи статус на миллисекунды становится `generating` (атомарный `TrySetStatus`), версия сверяется с проверенной. `IterateGame`, `RestoreVersion`, `DeleteGame` отменяют проверку. Свои слоты (2), слоты сборок не занимает. Варианты экспериментов не проверяются.
+- `GET /status` → поле `review {phase, elapsed_ms}`; миграция `000007` разрешает `generations.kind = 'review'`. Фронт: надпись в чате и автоподгрузка версии ревьюера.
+- Переменные `LLM_PLANNER_REASONING`, `LLM_REVIEWER_MODEL`, `LLM_REVIEWER_REASONING` в compose.
 
 ## Проверено
 `go build/vet`, `go test -race ./...`, 28 тестов фронта, полный стек в Docker с моком LLM: план → правка → подтверждение → тест в Chrome поймал ошибки → исправитель → v1 → правка → v2, `smoke.sh` целиком. **С реальной моделью не проверялось** — нет ключа.

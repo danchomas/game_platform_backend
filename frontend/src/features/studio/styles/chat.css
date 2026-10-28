@@ -397,6 +397,22 @@
   font-size: 12px;
   color: #a0ab8c;
 }
+.review-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 8px 36px;
+  padding: 9px 12px;
+  border: 1px dashed #dfe6cf;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #8d9a76;
+}
+.review-note .step-dot {
+  flex-shrink: 0;
+  background: #becb98;
+  animation: pulse 1s infinite;
+}
 .gen-steps {
   display: flex;
   flex-direction: column;
