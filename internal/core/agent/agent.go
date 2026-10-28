@@ -18,9 +18,11 @@ import (
 )
 
 type Models struct {
-	Planner   string
-	Coder     string
-	Fixer     string
+	Planner string
+	Coder   string
+	Fixer   string
+	// Reviewer — проверка логики кода по плану; пусто — без проверки.
+	Reviewer  string
 	Fallbacks []string
 	MaxTokens int
 }
@@ -29,8 +31,11 @@ type Config struct {
 	Models       Models
 	MaxFixRounds int
 	CallTimeout  time.Duration
-	// Reasoning — бюджет рассуждений «думающих» моделей (llm.Reasoning*), см. LLM_REASONING.
-	Reasoning string
+	// Reasoning — бюджет рассуждений «думающих» моделей (llm.Reasoning*) для кодера и исправителя.
+	// У планировщика и ревьюера свои: пусто — как у кодера.
+	Reasoning         string
+	PlannerReasoning  string
+	ReviewerReasoning string
 }
 
 type Agent struct {
@@ -52,6 +57,12 @@ func New(p llm.Provider, t Tester, cfg Config) *Agent {
 	}
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = 4 * time.Minute
+	}
+	if cfg.PlannerReasoning == "" {
+		cfg.PlannerReasoning = cfg.Reasoning
+	}
+	if cfg.ReviewerReasoning == "" {
+		cfg.ReviewerReasoning = cfg.Reasoning
 	}
 	return &Agent{llm: p, tester: t, cfg: cfg}
 }
@@ -100,11 +111,23 @@ type Stage func(status, detail string)
 // ответила, вызов повторяется один раз с выключенными рассуждениями.
 // w != nil — ответ идёт потоком, и его ход сообщается наружу.
 func (a *Agent) call(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, w watcher, tr *Trace) (string, error) {
-	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, a.cfg.Reasoning, w, tr)
-	if errors.Is(err, llm.ErrEmptyTruncated) && a.cfg.Reasoning != llm.ReasoningOff {
+	reasoning := a.reasoningFor(role)
+	text, err := a.callOnce(ctx, role, model, msgs, temp, maxCont, reasoning, w, tr)
+	if errors.Is(err, llm.ErrEmptyTruncated) && reasoning != llm.ReasoningOff {
 		return a.callOnce(ctx, role, model, msgs, temp, maxCont, llm.ReasoningOff, w, tr)
 	}
 	return text, err
+}
+
+func (a *Agent) reasoningFor(role string) string {
+	switch role {
+	case "planner":
+		return a.cfg.PlannerReasoning
+	case "reviewer":
+		return a.cfg.ReviewerReasoning
+	default:
+		return a.cfg.Reasoning
+	}
 }
 
 func (a *Agent) callOnce(ctx context.Context, role, model string, msgs []llm.Msg, temp float64, maxCont int, reasoning string, w watcher, tr *Trace) (string, error) {
@@ -249,9 +272,16 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		planned = nil
 	}
 	var issues, earlier []domain.Issue
+	reviewNeeded := planned != nil && a.cfg.Models.Reviewer != ""
 	for round := 0; ; round++ {
 		if err := ctx.Err(); err != nil {
 			return BuildOutput{}, err
+		}
+		// ревьюер читает код параллельно с тестом в браузере: время сборки почти не растёт
+		var reviewed chan []domain.Issue
+		if reviewNeeded {
+			reviewed = make(chan []domain.Issue, 1)
+			go func(code string) { reviewed <- a.review(ctx, *planned, code, tr) }(html)
 		}
 		stage(domain.StatusValidating, "")
 		issues = Validate(html, planned)
@@ -265,6 +295,12 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 				tr.Report = &rep
 				issues = append(issues, rep.Issues()...)
 			}
+		}
+		if reviewed != nil {
+			logic := <-reviewed
+			issues = append(issues, logic...)
+			// повторно проверяем только то, что ревьюер уже находил: исправлено ли
+			reviewNeeded = domain.HasErrors(logic)
 		}
 		tr.Issues = withFixed(issues, earlier)
 
@@ -323,6 +359,50 @@ func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, te
 		lastErr = fmt.Errorf("попытка %d: %w", attempt+1, perr)
 	}
 	return llm.Result{}, lastErr
+}
+
+const maxReviewIssues = 5
+
+// review — проверка логики кода по плану. Сбой ревьюера не мешает сборке: только предупреждение.
+func (a *Agent) review(ctx context.Context, spec domain.GameSpec, code string, tr *Trace) []domain.Issue {
+	raw, err := a.call(ctx, "reviewer", a.cfg.Models.Reviewer, llm.ReviewMessages(spec, code), 0.2, 0, nil, tr)
+	var out struct {
+		Issues []struct {
+			Severity string `json:"severity"`
+			Title    string `json:"title"`
+			Details  string `json:"details"`
+			Fix      string `json:"fix"`
+		} `json:"issues"`
+	}
+	if err == nil {
+		err = llm.ParseJSON(raw, &out)
+	}
+	if err != nil {
+		return []domain.Issue{{Code: "review_unavailable", Severity: domain.SevWarn, Message: "logic review failed: " + clipMsg(err.Error())}}
+	}
+	var issues []domain.Issue
+	for i, r := range out.Issues {
+		if i == maxReviewIssues {
+			break
+		}
+		sev := domain.SevWarn
+		if strings.EqualFold(r.Severity, string(domain.SevError)) {
+			sev = domain.SevError
+		}
+		msg := r.Title + ": " + r.Details
+		if r.Fix != "" {
+			msg += " Fix: " + r.Fix
+		}
+		issues = append(issues, domain.Issue{Code: fmt.Sprintf("logic_%d", i+1), Severity: sev, Message: clipMsg(msg)})
+	}
+	return issues
+}
+
+func clipMsg(s string) string {
+	if r := []rune(s); len(r) > 600 {
+		return string(r[:600]) + "…"
+	}
+	return s
 }
 
 // fixPatchChars — обычный объём правок исправителя, для полосы прогресса.

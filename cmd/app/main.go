@@ -101,16 +101,20 @@ func run() error {
 			Planner:   cfg.PlannerModel,
 			Coder:     cfg.OpenRouterModel,
 			Fixer:     cfg.FixerModel,
+			Reviewer:  cfg.ReviewerModel,
 			Fallbacks: cfg.FallbackModels,
 			MaxTokens: cfg.LLMMaxTokens,
 		},
-		MaxFixRounds: cfg.MaxFixRounds,
-		CallTimeout:  cfg.LLMTimeout,
-		Reasoning:    cfg.Reasoning,
+		MaxFixRounds:      cfg.MaxFixRounds,
+		CallTimeout:       cfg.LLMTimeout,
+		Reasoning:         cfg.Reasoning,
+		PlannerReasoning:  cfg.PlannerReasoning,
+		ReviewerReasoning: cfg.ReviewerReasoning,
 	})
 	slog.Info("агент настроен",
-		"planner", cfg.PlannerModel, "coder", cfg.OpenRouterModel, "fixer", cfg.FixerModel,
-		"fix_rounds", cfg.MaxFixRounds, "reasoning", cfg.Reasoning, "browser_test", tester != nil)
+		"planner", cfg.PlannerModel, "coder", cfg.OpenRouterModel, "fixer", cfg.FixerModel, "reviewer", cfg.ReviewerModel,
+		"fix_rounds", cfg.MaxFixRounds, "reasoning", cfg.Reasoning, "planner_reasoning", cfg.PlannerReasoning,
+		"reviewer_reasoning", cfg.ReviewerReasoning, "browser_test", tester != nil)
 
 	users := authRepo.NewRepository(pool)
 	games := gamesRepo.NewRepository(pool)

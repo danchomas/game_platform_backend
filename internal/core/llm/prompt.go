@@ -26,6 +26,10 @@ Return ONLY one JSON object (no markdown, no prose) with this shape:
  "win_condition": "...",
  "lose_condition": "... (for very young/elderly players prefer gentle fail states: lives, retry, no harsh punishment)",
  "controls": {"scheme": "tap|swipe|drag|hold|mixed|buttons", "gestures": ["tap","swipe","drag","hold"], "buttons": [], "description": "how the player controls the game, in the request language"},
+ "camera": {"view": "side|top_down|behind|board|static", "description": "exactly what the player sees, e.g. 'side view: the hero runs to the right, ground is the bottom 20% of the screen, obstacles come from the right edge'"},
+ "mechanics": ["4-8 concrete rules: what moves and in which direction, what EACH gesture does, gravity/jumps, collisions, how objects spawn, how score and difficulty change"],
+ "tuning": {"snake_case_name": 0.0},
+ "decisions": ["which option was chosen where the request offered alternatives or was vague, and why"],
  "difficulty": {"start": "...", "ramp": "how it gets harder over time/levels"},
  "round_seconds": 120,
  "levels": 1,
@@ -38,6 +42,17 @@ Return ONLY one JSON object (no markdown, no prose) with this shape:
 }
 
 DESIGN RULES:
+- ONE COHERENT DESIGN. If the request offers alternatives ("or", "либо", "в варианте с ...", "можно ..."), choose ONE and write it into "decisions"; never merge alternatives into one game.
+- The camera defines the movement, never mix them:
+  side -> the world scrolls horizontally, the hero moves along X, jumps with gravity (no lanes);
+  behind -> the world comes towards the player, 2-4 lanes, swipe left/right changes lane, tap/swipe up jumps;
+  top_down -> free 2D movement on the plane (snake, maze, shooter);
+  board -> a grid of cells (match-3, 2048, puzzles); static -> one screen without scrolling (clicker, catcher).
+- "tuning": 5-12 key numbers that make the game feel right, in FRACTIONS OF THE SCREEN (of its height or width, say which in the name) and SECONDS, never pixels.
+  e.g. runner: gravity_h_per_s2, jump_height_h, run_speed_w_per_s, speed_up_per_10s, obstacle_height_h, obstacle_gap_min_w, coin_rate_per_s;
+  snake: step_seconds, step_speed_up, grid_cols; match-3: grid_size, swap_seconds, fall_seconds.
+  They must agree with each other and with the audience: the hero can actually jump over obstacles, gaps are passable at top speed, slow for elderly players.
+- Before answering, re-read the plan and fix contradictions between camera, controls, mechanics and tuning.
 - Controls are GESTURES on the game field. Pick the most natural single gesture for the genre:
   snake/maze/2048/match -> swipe; clicker/one-button/flappy/timing -> tap; aiming/slingshot/drawing/paddle -> drag; charge/fly-up -> hold;
   falling blocks -> swipe left/right/down + tap to rotate; platformer/runner -> hold the left/right half of the screen to move, swipe up or tap to jump;
@@ -111,8 +126,10 @@ HARD REQUIREMENTS:
      window.GameSDK && GameSDK.event('level_up', {level: 2});   // the plan's custom events, snake_case
    Always send 'lose_reason' ({reason:'hit_wall'|'time_up'|...}) right before end('lose'), and 'level_up' when a level/stage is passed.
 10. Juicy but light: small particles, screen shake, sfx on key moments, progressive difficulty from the plan.
-11. NO COMMENTS: write no comments at all — no explanations, section headers, TODOs, JSDoc or commented-out code, in JS, CSS and HTML. Every comment costs generation time. Use clear names instead. The ONLY allowed comments are the progress markers below.
-12. PROGRESS MARKERS: the user watches your progress live. Start each major part of the code with a marker comment on its own line, in the plan's language, 2-5 words, describing what this part does for the player:
+11. FOLLOW THE PLAN'S DESIGN EXACTLY: the camera view, every rule in "mechanics" and every gesture as described. Put the plan's "tuning" into const TUNING = {...} at the top of the script with the same names and values, and use it everywhere instead of literal numbers (convert screen fractions with GameKit.width/height in onResize, multiply speeds by dt). Movement must be smooth and frame-rate independent.
+   When modifying a game, change TUNING values for speed/size/difficulty requests instead of rewriting logic.
+12. NO COMMENTS: write no comments at all — no explanations, section headers, TODOs, JSDoc or commented-out code, in JS, CSS and HTML. Every comment costs generation time. Use clear names instead. The ONLY allowed comments are the progress markers below.
+13. PROGRESS MARKERS: the user watches your progress live. Start each major part of the code with a marker comment on its own line, in the plan's language, 2-5 words, describing what this part does for the player:
      /* @step Оформление */   // @step Рисуем игровое поле   // @step Управление свайпами   // @step Экран победы
    6-10 markers in the order you write them, spread across the whole file. When modifying a game, keep the existing markers.
 
@@ -155,6 +172,33 @@ OUTPUT FORMAT (strict, nothing outside these tags):
 <!DOCTYPE html>
 ... the COMPLETE fixed file ...
 </game>`
+
+// reviewerPrompt — проверка логики кода по плану. Синтаксис и падения ловит тест в браузере,
+// здесь — то, что тест не видит: игра работает, но играется не так, как задумано.
+const reviewerPrompt = platformContext + `
+
+You are the GAME REVIEWER agent. You get the approved plan and the game code. A headless browser already checked that the code runs; you check that the GAMEPLAY LOGIC matches the plan and makes sense for the player. Read the code carefully and trace what actually happens.
+
+Check ONLY these:
+1. Camera: the code draws and moves the world as plan.camera says (e.g. a side view has no lanes; a "behind" view has lanes and objects coming towards the player).
+2. Controls: every gesture in the plan does exactly what the plan says, nothing important is missing, no gesture conflicts with another (e.g. a swipe also triggering a tap action).
+3. Mechanics: each rule in plan.mechanics is implemented; movement direction, gravity and collisions are consistent; speeds use dt (frame-rate independent).
+4. Playability with the TUNING numbers: the hero can actually avoid or pass obstacles (jump height vs obstacle height, gaps vs speed), spawning always leaves a way through, difficulty grows but stays bounded, the round can be won and lost as the plan says.
+5. Flow: start -> play -> result -> "play again" resets the whole state (score, speed, objects, timers).
+
+Do NOT report: code style, naming, performance, missing comments, visuals/colors, or anything about syntax/runtime errors.
+severity "error" only when a player would clearly notice broken, impossible or confusing gameplay; otherwise "warn". At most 5 issues, most important first. If everything is fine, return an empty list.
+
+Return ONLY JSON (no markdown):
+{"issues": [{"severity": "error|warn", "title": "short name", "details": "what exactly happens in the code (name the functions/variables)", "fix": "the concrete change to make"}]}`
+
+// ReviewMessages — план и код игры (без GameKit) для ревьюера.
+func ReviewMessages(spec domain.GameSpec, code string) []Msg {
+	return []Msg{
+		{Role: "system", Content: reviewerPrompt},
+		{Role: "user", Content: "APPROVED PLAN:\n" + specJSON(spec) + "\n\nGAME CODE:\n<source>\n" + code + "\n</source>"},
+	}
+}
 
 // HintInput — данные аналитики для подсказки агенту.
 type HintInput struct {
