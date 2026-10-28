@@ -24,6 +24,8 @@ const (
 	// План — короткий синхронный вызов; сборка идёт в фоне и может подождать слот дольше.
 	waitForSlot      = 20 * time.Second
 	waitForBuildSlot = 3 * time.Minute
+	// Варианты мультигенерации стартуют пачкой и встают в очередь за слотами сами за собой.
+	waitForVariantSlot = 20 * time.Minute
 
 	generationsLimit = 50
 )

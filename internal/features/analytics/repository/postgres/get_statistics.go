@@ -5,7 +5,8 @@ import (
 	"context"
 )
 
-const reservedTypes = `'session_start','engaged','game_start','game_end','session_end'`
+// reservedTypes — события SDK и сервера; всё остальное — собственные события игры.
+const reservedTypes = `'session_start','engaged','game_start','game_end','session_end','exposure'`
 
 const aggCols = `
   count(DISTINCT e.session_id) FILTER (WHERE e.type='session_start'),

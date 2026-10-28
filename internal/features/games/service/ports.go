@@ -10,6 +10,7 @@ import (
 
 type GameRepository interface {
 	CreateGame(ctx context.Context, ownerID, prompt string) (string, error)
+	CreateVariant(ctx context.Context, in domain.VariantInput) (string, error)
 	GetGame(ctx context.Context, id string) (domain.Game, error)
 	ListOwnerGames(ctx context.Context, ownerID string, q domain.GameQuery) ([]domain.Game, error)
 	ListPublished(ctx context.Context, q domain.GameQuery) ([]domain.Game, error)

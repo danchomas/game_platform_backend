@@ -6,12 +6,22 @@ import { Toast } from '../shared/ui/Toast';
 import { StudioPage } from '../features/studio/StudioPage';
 import { GalleryPage } from '../features/games/GalleryPage';
 import { AnalyticsPage } from '../features/analytics/AnalyticsPage';
+import { ExperimentsPage } from '../features/experiments/ExperimentsPage';
 import { WorkspaceDialogs } from './WorkspaceDialogs';
 import { useWorkspace } from './useWorkspace';
 
 export default function App() {
-  const { session, library, editor, analytics, notifications, navigation, dialogs } =
-    useWorkspace();
+  const {
+    session,
+    library,
+    editor,
+    analytics,
+    experiments,
+    multigen,
+    notifications,
+    navigation,
+    dialogs,
+  } = useWorkspace();
   const { page, menuOpen, setMenuOpen, navigate, newGame, openGame } = navigation;
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
   return (
@@ -84,6 +94,16 @@ export default function App() {
                 game,
               })
             }
+          />
+        )}
+        {page === 'experiments' && (
+          <ExperimentsPage
+            experiments={experiments}
+            demo={session.isDemo}
+            playBase={multigen.playBase}
+            previewURL={multigen.previewURL}
+            onOpenVariant={multigen.openVariant}
+            notify={notifications.notify}
           />
         )}
         {page === 'analytics' && (

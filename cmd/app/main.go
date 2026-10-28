@@ -30,6 +30,10 @@ import (
 	analyticsSvc "beeline-games/internal/features/analytics/service"
 	analyticsHTTP "beeline-games/internal/features/analytics/transport/http"
 
+	experimentsRepo "beeline-games/internal/features/experiments/repository/postgres"
+	experimentsSvc "beeline-games/internal/features/experiments/service"
+	experimentsHTTP "beeline-games/internal/features/experiments/transport/http"
+
 	playSvc "beeline-games/internal/features/play/service"
 	playHTTP "beeline-games/internal/features/play/transport/http"
 )
@@ -111,6 +115,7 @@ func run() error {
 	users := authRepo.NewRepository(pool)
 	games := gamesRepo.NewRepository(pool)
 	stats := analyticsRepo.NewRepository(pool)
+	experimentStore := experimentsRepo.NewRepository(pool)
 
 	auth := authSvc.NewService(users, cfg.JWTSecret, cfg.ManagerCode)
 	gameCatalog := gamesSvc.NewService(ctx, games, gameAgent, nil, cfg.MaxConcurrentGen)
@@ -118,7 +123,8 @@ func run() error {
 		slog.Error("прерванные генерации не сброшены", "err", err)
 	}
 	analytics := analyticsSvc.NewService(stats, gameCatalog)
-	play := playSvc.NewService(gameCatalog, eventCollector, cfg.PublicBaseURL)
+	experiments := experimentsSvc.NewService(experimentStore, gameCatalog)
+	play := playSvc.NewService(gameCatalog, experiments, eventCollector, cfg.PublicBaseURL)
 
 	gameCatalog.SetInsights(analytics)
 
@@ -129,6 +135,7 @@ func run() error {
 	authHTTP.NewHandler(auth).RegisterRoutes(mux, authMW)
 	gamesHTTP.NewHandler(gameCatalog, cfg.PublicBaseURL).RegisterRoutes(mux, authMW, optionalAuthMW)
 	analyticsHTTP.NewHandler(analytics).RegisterRoutes(mux, authMW)
+	experimentsHTTP.NewHandler(experiments, cfg.PublicBaseURL).RegisterRoutes(mux, authMW)
 	playHTTP.NewHandler(play).RegisterRoutes(mux, authMW, optionalAuthMW)
 
 	mux.HandleFunc("GET /healthz", healthz(pool))

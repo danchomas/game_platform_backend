@@ -193,6 +193,64 @@ func TestFailedFirstBuildKeepsPlanForRetry(t *testing.T) {
 	}
 }
 
+func TestStartVariantPlansAndBuildsWithoutApproval(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{spec: snakeSpec(), html: gameHTML("variant")}
+	svc := newTestService(repo, ag)
+
+	id, err := svc.StartVariant(context.Background(), domain.VariantInput{
+		OwnerID: "owner-1", ExperimentID: "exp-1", Label: "B",
+		Direction: "Драйв: короткие раунды", Prompt: "  змейка для бабушки ",
+	})
+	if err != nil {
+		t.Fatalf("вариант не запущен: %v", err)
+	}
+	svc.Wait()
+
+	g := repo.game(id)
+	if g.Status != domain.StatusReady || g.Version != 1 {
+		t.Errorf("вариант не собран: статус %q, версия %d", g.Status, g.Version)
+	}
+	if g.ExperimentID != "exp-1" || g.VariantLabel != "B" {
+		t.Errorf("вариант не привязан к эксперименту: %+v", g)
+	}
+	if ag.lastPlan.Direction != "Драйв: короткие раунды" || ag.lastPlan.Prompt != "змейка для бабушки" {
+		t.Errorf("планировщик не получил направление варианта: %+v", ag.lastPlan)
+	}
+	if _, ok := repo.lastGen(domain.GenBuild); !ok {
+		t.Error("сборка варианта не записана в телеметрию")
+	}
+}
+
+func TestStartVariantFailsWhenPlanFails(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{planErr: apperr.ErrLLMFailed}
+	svc := newTestService(repo, ag)
+
+	id, err := svc.StartVariant(context.Background(), domain.VariantInput{OwnerID: "owner-1", Label: "A", Prompt: "змейка"})
+	if err != nil {
+		t.Fatalf("вариант не запущен: %v", err)
+	}
+	svc.Wait()
+
+	if g := repo.game(id); g.Status != domain.StatusFailed {
+		t.Errorf("статус = %q, ожидался %q", g.Status, domain.StatusFailed)
+	}
+	if ag.builds != 0 {
+		t.Errorf("без плана сборки быть не должно, было %d", ag.builds)
+	}
+}
+
+func TestStartVariantRejectsShortPrompt(t *testing.T) {
+	_, err := newTestService(newFakeRepo(), &fakeAgent{}).
+		StartVariant(context.Background(), domain.VariantInput{Prompt: "a"})
+
+	var vErr *apperr.ValidationError
+	if !errors.As(err, &vErr) || vErr.Field != "prompt" {
+		t.Fatalf("ожидалась ошибка валидации поля prompt, получено: %v", err)
+	}
+}
+
 func TestRevisePlanSendsFeedbackAndCurrentPlan(t *testing.T) {
 	repo := newFakeRepo()
 	ag := &fakeAgent{spec: snakeSpec()}

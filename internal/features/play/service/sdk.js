@@ -1,6 +1,7 @@
 /* Beeline Game SDK: встраивается сервером в каждую игру при отдаче (/g/{id}) и экспорте. */
 (function () {
-  var CFG = { game: "__GAME_ID__", url: "__ENDPOINT__", on: __ENABLED__ };
+  // pid и sid задаёт сервер при показе варианта эксперимента: так показ и сессия игры связаны
+  var CFG = { game: "__GAME_ID__", url: "__ENDPOINT__", on: __ENABLED__, pid: "__PLAYER_ID__", sid: "__SESSION_ID__" };
   var q = [], errs = 0, engaged = false, endSent = false;
 
   function rid() {
@@ -17,7 +18,7 @@
       return p;
     } catch (e) { return rid(); }
   }
-  var sid = rid(), pid = playerId();
+  var sid = CFG.sid || rid(), pid = CFG.pid || playerId();
 
   var active = 0, last = Date.now(), vis = !document.hidden;
   function acc() { var n = Date.now(); if (vis) active += n - last; last = n; vis = !document.hidden; }

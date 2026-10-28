@@ -50,6 +50,17 @@ func (f *fakeRepo) CreateGame(_ context.Context, ownerID, prompt string) (string
 	return id, nil
 }
 
+func (f *fakeRepo) CreateVariant(ctx context.Context, in domain.VariantInput) (string, error) {
+	id, _ := f.CreateGame(ctx, in.OwnerID, in.Prompt)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.games[id]
+	g.ExperimentID, g.VariantLabel = in.ExperimentID, in.Label
+	f.games[id] = g
+	return id, nil
+}
+
 // seedGame — готовая собранная игра для тестов правок и отката.
 func (f *fakeRepo) seedGame(ownerID, html string) string {
 	id, _ := f.CreateGame(context.Background(), ownerID, "готовая игра")

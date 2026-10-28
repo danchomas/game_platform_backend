@@ -53,6 +53,7 @@ type EventBatch struct {
 
 type Service struct {
 	games         GamesProvider
+	experiments   ExperimentRouter
 	collector     CollectorProvider
 	publicBaseURL string
 
@@ -65,9 +66,10 @@ type pubEntry struct {
 	exp time.Time
 }
 
-func NewService(games GamesProvider, col CollectorProvider, publicBaseURL string) *Service {
+func NewService(games GamesProvider, experiments ExperimentRouter, col CollectorProvider, publicBaseURL string) *Service {
 	return &Service{
 		games:         games,
+		experiments:   experiments,
 		collector:     col,
 		publicBaseURL: publicBaseURL,
 		pubCache:      make(map[string]pubEntry),
@@ -86,14 +88,26 @@ func (s *Service) GetPlayableHTML(ctx context.Context, userID, gameID string) (s
 		return "", false, apperr.ErrNotFound
 	}
 
-	return s.injectSDK(g.HTML, g.ID, g.Published), g.Published, nil
+	return s.injectSDK(g.HTML, sdkParams{GameID: g.ID, Enabled: g.Published}), g.Published, nil
 }
 
-func (s *Service) injectSDK(html, gameID string, enabled bool) string {
+// sdkParams — подстановки в sdk.js. PlayerID и SessionID задаёт сервер при показе
+// варианта эксперимента; пусто — SDK заводит их сам. В JS-строку они попадают как есть,
+// поэтому допустимы только значения, прошедшие playerIDRe, или сгенерированные сервером.
+type sdkParams struct {
+	GameID    string
+	Enabled   bool
+	PlayerID  string
+	SessionID string
+}
+
+func (s *Service) injectSDK(html string, p sdkParams) string {
 	js := strings.NewReplacer(
-		"__GAME_ID__", gameID,
+		"__GAME_ID__", p.GameID,
 		"__ENDPOINT__", s.publicBaseURL+"/api/events",
-		"__ENABLED__", strconv.FormatBool(enabled),
+		"__ENABLED__", strconv.FormatBool(p.Enabled),
+		"__PLAYER_ID__", p.PlayerID,
+		"__SESSION_ID__", p.SessionID,
 	).Replace(sdkJS)
 	tag := "<script>" + js + "</script>"
 
@@ -118,7 +132,8 @@ func (s *Service) ProcessEvents(ctx context.Context, batch EventBatch) error {
 	playerID := truncate(batch.PlayerID, maxPlayerIDLen)
 
 	for _, e := range batch.Events {
-		if !eventTypeRe.MatchString(e.Type) {
+		// показ записывает только сервер: иначе игра могла бы накрутить себе знаменатель
+		if !eventTypeRe.MatchString(e.Type) || e.Type == eventExposure {
 			continue
 		}
 

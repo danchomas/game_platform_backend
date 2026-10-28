@@ -18,9 +18,12 @@ type Game struct {
 	Status       string
 	StatusDetail string
 	// Spec — утверждаемый план игры (JSON domain.GameSpec), пусто до планирования.
-	Spec      []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Spec []byte
+	// ExperimentID и VariantLabel — у игры-варианта мультигенерации, иначе пусто.
+	ExperimentID string
+	VariantLabel string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (g Game) Generated() bool { return g.Version > 0 && g.HTML != "" }

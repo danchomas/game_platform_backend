@@ -144,12 +144,14 @@ type PlanInput struct {
 	History  []llm.Msg
 	Current  *domain.GameSpec
 	Feedback string
-	Hint     llm.HintInput
+	// Direction — направление варианта мультигенерации, пусто для обычной игры.
+	Direction string
+	Hint      llm.HintInput
 }
 
 // Plan составляет план игры или правит текущий по отзыву пользователя.
 func (a *Agent) Plan(ctx context.Context, in PlanInput, tr *Trace) (domain.GameSpec, error) {
-	msgs := llm.PlanMessages(in.Hint, in.History, in.Prompt, in.Current, in.Feedback)
+	msgs := llm.PlanMessages(in.Hint, in.History, in.Prompt, in.Current, in.Feedback, in.Direction)
 	var spec domain.GameSpec
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {

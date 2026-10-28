@@ -15,3 +15,8 @@ type GamesProvider interface {
 type CollectorProvider interface {
 	Add(e collector.Event)
 }
+
+// ExperimentRouter выбирает вариант эксперимента для игрока.
+type ExperimentRouter interface {
+	PickVariant(ctx context.Context, experimentID, playerID string) (string, error)
+}

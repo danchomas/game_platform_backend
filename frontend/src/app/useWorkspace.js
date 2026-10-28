@@ -3,6 +3,7 @@ import { useSession } from '../features/connection/hooks/useSession';
 import { useGames } from '../features/games/hooks/useGames';
 import { useGameEditor } from '../features/studio/hooks/useGameEditor';
 import { useAnalytics } from '../features/analytics/hooks/useAnalytics';
+import { useExperiments } from '../features/experiments/hooks/useExperiments';
 import { useNotifications } from '../shared/ui/useNotifications';
 
 /** Coordinates navigation and dialogs; feature state and server work stay in feature hooks. */
@@ -52,6 +53,14 @@ export function useWorkspace() {
     demoGames: library.demoGames,
     onError: setError,
   });
+  const experiments = useExperiments({
+    api: session.api,
+    isDemo: session.isDemo,
+    enabled: page === 'experiments',
+    onError: setError,
+    onChanged: library.refresh,
+    notify,
+  });
   const closeDialog = useCallback(() => {
     if (dialogLock.current) {
       return;
@@ -77,6 +86,17 @@ export function useWorkspace() {
     }
     editor.reset();
     navigate('studio');
+  }
+  // A variant is an ordinary game owned by the caller; the library may not have loaded it yet.
+  function openVariant(variant) {
+    return openGame({
+      id: variant.game_id,
+      title: variant.title,
+      version: variant.version,
+      status: variant.status,
+      published: variant.published,
+      owner_id: session.auth?.user?.id,
+    });
   }
   function openGame(game) {
     if (!canSwitchGame()) {
@@ -171,6 +191,11 @@ export function useWorkspace() {
       notify(dialog.type === 'delete' ? 'Игра удалена.' : 'Название обновлено.');
     });
   }
+  const playBase = session.config.base || window.location.origin;
+  // <img> cannot send the Authorization header; drafts' previews accept ?token= like the play iframe.
+  const previewURL = (gameId, version) =>
+    `${playBase}/api/games/${encodeURIComponent(gameId)}/preview.jpg?v=${version}` +
+    (session.auth?.token ? `&token=${encodeURIComponent(session.auth.token)}` : '');
   const gameURL = editor.game
     ? `${session.config.base || window.location.origin}/g/${encodeURIComponent(editor.game.id)}`
     : '';
@@ -179,6 +204,12 @@ export function useWorkspace() {
     library,
     editor,
     analytics,
+    experiments,
+    multigen: {
+      playBase,
+      previewURL,
+      openVariant,
+    },
     notifications,
     navigation: {
       page,
