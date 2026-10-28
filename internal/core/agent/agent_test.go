@@ -223,3 +223,18 @@ func TestCallRetriesWithoutReasoningWhenBudgetIsExhausted(t *testing.T) {
 		t.Errorf("неудачная попытка должна остаться в телеметрии с токенами: %+v", tr.Calls)
 	}
 }
+
+func TestIncompleteBrowserTestDoesNotBlameTheGame(t *testing.T) {
+	// так выглядел отчёт, когда тест упирался в таймаут: кадры «не шли», хотя игра работала
+	rep := TestReport{StartCalled: true, FramesPlay: 0, Incomplete: "context deadline exceeded"}
+	codes := map[string]domain.Severity{}
+	for _, i := range rep.Issues() {
+		codes[i.Code] = i.Severity
+	}
+	if codes["test_incomplete"] != domain.SevWarn || len(codes) != 1 {
+		t.Fatalf("only a warning about the test is expected, got %v", codes)
+	}
+	if issues := (TestReport{StartCalled: true, FramesPlay: 30, ScreensCompared: false}).Issues(); len(issues) != 0 {
+		t.Fatalf("missing screenshots must not mean a frozen screen: %+v", issues)
+	}
+}

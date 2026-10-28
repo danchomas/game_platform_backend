@@ -35,6 +35,9 @@ services:
     image: chromedp/headless-shell:latest
     restart: unless-stopped
     shm_size: 512m
+    # Холст без эмуляции GPU (SwiftShader): с ней снимок экрана и чтение пикселей во время
+    # игры занимали 10–30 с, тест упирался в таймаут и выдавал ложный no_game_loop.
+    command: ["--disable-gpu", "--disable-accelerated-2d-canvas", "--disable-gpu-compositing"]
     expose:
       - "9222"
 
