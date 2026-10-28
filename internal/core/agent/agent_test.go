@@ -224,6 +224,45 @@ func TestCallRetriesWithoutReasoningWhenBudgetIsExhausted(t *testing.T) {
 	}
 }
 
+func callRoles(tr *Trace) string {
+	roles := make([]string, 0, len(tr.Calls))
+	for _, c := range tr.Calls {
+		roles = append(roles, c.Role)
+	}
+	return strings.Join(roles, ",")
+}
+
+func TestFixerSendsEditsInsteadOfWholeFile(t *testing.T) {
+	broken := strings.Replace(goodGame, "function over()", "brokenCall();\nfunction over()", 1)
+	patch := "<reply>Убрал лишний вызов</reply>\n<patch>\n<<<<<<< SEARCH\nbrokenCall();\n=======\n>>>>>>> REPLACE\n</patch>"
+	l := &fakeLLM{answers: []string{wrap(broken), patch}}
+	tester := &fakeTester{reports: []TestReport{{Errors: []string{"ReferenceError: brokenCall is not defined"}, StartCalled: true, FramesPlay: 30, ChangedOnInput: true}, okReport}}
+	tr := &Trace{}
+	out, err := newAgent(l, tester).Build(context.Background(), BuildInput{Prompt: "змейка", Spec: &domain.GameSpec{}}, nil, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callRoles(tr) != "coder,fixer" || strings.Contains(out.HTML, "brokenCall") || domain.HasErrors(out.Issues) {
+		t.Fatalf("roles=%s issues=%+v", callRoles(tr), out.Issues)
+	}
+	if !strings.Contains(out.HTML, "function over()") {
+		t.Fatal("the rest of the game must stay as it was")
+	}
+}
+
+func TestFixerFallsBackToWholeFileWhenEditsDoNotApply(t *testing.T) {
+	bad := "<reply>x</reply><patch>\n<<<<<<< SEARCH\nthis line is not in the game\n=======\nfoo();\n>>>>>>> REPLACE\n</patch>"
+	l := &fakeLLM{answers: []string{wrap(goodGame), bad, wrap(goodGame)}}
+	tester := &fakeTester{reports: []TestReport{{Errors: []string{"TypeError: x"}, StartCalled: true, FramesPlay: 30, ChangedOnInput: true}, okReport}}
+	tr := &Trace{}
+	if _, err := newAgent(l, tester).Build(context.Background(), BuildInput{Prompt: "змейка", Spec: &domain.GameSpec{}}, nil, tr); err != nil {
+		t.Fatal(err)
+	}
+	if callRoles(tr) != "coder,fixer,fixer_full" {
+		t.Fatalf("roles=%s", callRoles(tr))
+	}
+}
+
 func TestIncompleteBrowserTestDoesNotBlameTheGame(t *testing.T) {
 	// так выглядел отчёт, когда тест упирался в таймаут: кадры «не шли», хотя игра работала
 	rep := TestReport{StartCalled: true, FramesPlay: 0, Incomplete: "context deadline exceeded"}

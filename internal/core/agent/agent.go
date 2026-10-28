@@ -276,8 +276,7 @@ func (a *Agent) Build(ctx context.Context, in BuildInput, stage Stage, tr *Trace
 		blocking := errorsOnly(issues)
 		stage(domain.StatusFixing, fmt.Sprintf("круг %d: %s", round+1, issueCodes(blocking)))
 		tr.FixRounds++
-		fixed, ferr := a.code(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, blocking), 0.2,
-			in.Progress.watch("fixer", len(html)), tr)
+		fixed, ferr := a.fix(ctx, html, blocking, in.Progress, tr)
 		if ferr != nil {
 			if ctx.Err() != nil {
 				return BuildOutput{}, ctx.Err()
@@ -326,11 +325,55 @@ func (a *Agent) code(ctx context.Context, role, model string, msgs []llm.Msg, te
 	return llm.Result{}, lastErr
 }
 
+// fixPatchChars — обычный объём правок исправителя, для полосы прогресса.
+const fixPatchChars = 3000
+
+// fix — круг исправления правками SEARCH/REPLACE; если они не легли на код,
+// один запасной вызов возвращает файл целиком (роль fixer_full в телеметрии).
+func (a *Agent) fix(ctx context.Context, html string, issues []domain.Issue, p Progress, tr *Trace) (llm.Result, error) {
+	raw, err := a.call(ctx, "fixer", a.cfg.Models.Fixer, llm.FixMessages(html, issues), 0.2, 1,
+		p.watch("fixer", fixPatchChars), tr)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	res, perr := applyFix(html, raw)
+	if perr == nil {
+		return res, nil
+	}
+	return a.code(ctx, "fixer_full", a.cfg.Models.Fixer, llm.FixFullMessages(html, issues, perr.Error()), 0.2,
+		p.watch("fixer", len(html)), tr)
+}
+
+func applyFix(html, raw string) (llm.Result, error) {
+	if strings.Contains(raw, "<game>") {
+		return parseGame(raw) // модель всё же прислала файл целиком — тоже годится
+	}
+	reply, edits, err := llm.ParseEdits(raw)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	patched, err := llm.ApplyEdits(html, edits)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	if !strings.Contains(strings.ToLower(patched), "</html>") {
+		return llm.Result{}, errors.New("после правок документ оборван")
+	}
+	if reply == "" {
+		reply = "Исправил найденные ошибки."
+	}
+	return checkGame(llm.Result{Reply: reply, HTML: patched})
+}
+
 func parseGame(raw string) (llm.Result, error) {
 	res, err := llm.Parse(raw)
 	if err != nil {
 		return llm.Result{}, fmt.Errorf("%w: %w", apperr.ErrLLMFailed, err)
 	}
+	return checkGame(res)
+}
+
+func checkGame(res llm.Result) (llm.Result, error) {
 	res.HTML = htmlguard.Sanitize(res.HTML)
 	if err := htmlguard.Validate(res.HTML); err != nil {
 		return llm.Result{}, err

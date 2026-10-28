@@ -111,13 +111,14 @@ HARD REQUIREMENTS:
      window.GameSDK && GameSDK.event('level_up', {level: 2});   // the plan's custom events, snake_case
    Always send 'lose_reason' ({reason:'hit_wall'|'time_up'|...}) right before end('lose'), and 'level_up' when a level/stage is passed.
 10. Juicy but light: small particles, screen shake, sfx on key moments, progressive difficulty from the plan.
-11. PROGRESS MARKERS: the user watches your progress live. Start each major part of the code with a marker comment on its own line, in the plan's language, 2-5 words, describing what this part does for the player:
+11. NO COMMENTS: write no comments at all — no explanations, section headers, TODOs, JSDoc or commented-out code, in JS, CSS and HTML. Every comment costs generation time. Use clear names instead. The ONLY allowed comments are the progress markers below.
+12. PROGRESS MARKERS: the user watches your progress live. Start each major part of the code with a marker comment on its own line, in the plan's language, 2-5 words, describing what this part does for the player:
      /* @step Оформление */   // @step Рисуем игровое поле   // @step Управление свайпами   // @step Экран победы
    6-10 markers in the order you write them, spread across the whole file. When modifying a game, keep the existing markers.
 
 WHEN MODIFYING AN EXISTING GAME: you receive the current source and a change request. Apply ONLY the requested changes, keep everything else working, keep using GameKit and GameSDK, and return the COMPLETE updated file (never diffs or placeholders like "rest of the code").`
 
-const fixerPrompt = platformContext + `
+const fixerBase = platformContext + `
 
 You are the QA FIX agent. The game below was checked automatically (static analysis + a headless mobile browser that tapped and swiped through it). Fix EVERY listed problem with minimal, targeted changes and keep the gameplay and look the same.
 
@@ -125,6 +126,27 @@ You are the QA FIX agent. The game below was checked automatically (static analy
 
 Typical causes: syntax errors, using variables before declaration, calling GameKit.setup() before <body> exists, the start screen not reacting to GameKit 'action', missing GameSDK.start()/end() calls, game loop not started, external URLs.
 If on-screen buttons are reported as unwanted: remove GameKit.buttons/showButtons/isDown-by-button code and control the game with GameKit gestures on the field instead (the plan's control description says which).
+Do not add comments.`
+
+// fixerPrompt — исправление правками: в разы меньше токенов, чем весь файл.
+const fixerPrompt = fixerBase + `
+
+OUTPUT FORMAT (strict, nothing outside these tags). Send ONLY the changes as search/replace blocks, never the whole file:
+<reply>one short sentence in Russian about what was fixed</reply>
+<patch>
+<<<<<<< SEARCH
+exact lines copied from CURRENT SOURCE
+=======
+the new lines
+>>>>>>> REPLACE
+</patch>
+Rules for blocks:
+- SEARCH is copied from CURRENT SOURCE character for character (same indentation) and must match exactly one place: add 1-3 neighbouring lines if needed to make it unique.
+- Keep blocks small (a few lines). Use several blocks for several places; they are applied in order.
+- To insert code, SEARCH an existing line and put it back in REPLACE together with the new lines. To delete code, leave REPLACE empty.`
+
+// fixerFullPrompt — запасной вариант, если правки не применились: файл целиком.
+const fixerFullPrompt = fixerBase + `
 
 OUTPUT FORMAT (strict, nothing outside these tags):
 <reply>one short sentence in Russian about what was fixed</reply>
@@ -224,16 +246,29 @@ func EditMessages(h HintInput, history []Msg, spec *domain.GameSpec, currentHTML
 	return append(msgs, Msg{Role: "user", Content: b.String()})
 }
 
-// FixMessages — исправление по списку найденных проблем.
+// FixMessages — исправление правками по списку найденных проблем.
 func FixMessages(currentHTML string, issues []domain.Issue) []Msg {
+	return []Msg{
+		{Role: "system", Content: FixerSystem()},
+		{Role: "user", Content: problemsAndSource(currentHTML, issues)},
+	}
+}
+
+// FixFullMessages — запасной вариант: правки не применились (reason), нужен весь файл.
+func FixFullMessages(currentHTML string, issues []domain.Issue, reason string) []Msg {
+	return []Msg{
+		{Role: "system", Content: fixerFullPrompt},
+		{Role: "user", Content: problemsAndSource(currentHTML, issues) +
+			"\n\nYour search/replace edits could not be applied (" + reason + "). Return the COMPLETE fixed file."},
+	}
+}
+
+func problemsAndSource(currentHTML string, issues []domain.Issue) string {
 	var b strings.Builder
 	b.WriteString("PROBLEMS FOUND:\n")
 	for _, i := range issues {
 		fmt.Fprintf(&b, "- [%s] %s: %s\n", i.Severity, i.Code, i.Message)
 	}
-	b.WriteString("\nCURRENT SOURCE:\n<game>\n" + currentHTML + "\n</game>")
-	return []Msg{
-		{Role: "system", Content: FixerSystem()},
-		{Role: "user", Content: b.String()},
-	}
+	b.WriteString("\nCURRENT SOURCE:\n<source>\n" + currentHTML + "\n</source>")
+	return b.String()
 }
