@@ -111,6 +111,9 @@ HARD REQUIREMENTS:
      window.GameSDK && GameSDK.event('level_up', {level: 2});   // the plan's custom events, snake_case
    Always send 'lose_reason' ({reason:'hit_wall'|'time_up'|...}) right before end('lose'), and 'level_up' when a level/stage is passed.
 10. Juicy but light: small particles, screen shake, sfx on key moments, progressive difficulty from the plan.
+11. PROGRESS MARKERS: the user watches your progress live. Start each major part of the code with a marker comment on its own line, in the plan's language, 2-5 words, describing what this part does for the player:
+     /* @step Оформление */   // @step Рисуем игровое поле   // @step Управление свайпами   // @step Экран победы
+   6-10 markers in the order you write them, spread across the whole file. When modifying a game, keep the existing markers.
 
 WHEN MODIFYING AN EXISTING GAME: you receive the current source and a change request. Apply ONLY the requested changes, keep everything else working, keep using GameKit and GameSDK, and return the COMPLETE updated file (never diffs or placeholders like "rest of the code").`
 

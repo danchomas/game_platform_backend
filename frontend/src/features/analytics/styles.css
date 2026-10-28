@@ -11,7 +11,7 @@
   color: #d2d9b8;
 }
 .heading-note > span:last-child {
-  font-size: 10px;
+  font-size: 14px;
   color: #9eaa8a;
   line-height: 1.8;
 }
@@ -43,7 +43,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  font-size: 11px;
+  font-size: 14px;
   color: #82976b;
 }
 .stat-title svg {
@@ -66,7 +66,7 @@
   min-height: 32px;
 }
 .stat-bottom > span {
-  font-size: 9px;
+  font-size: 13px;
   color: #9aaa86;
   line-height: 1.8;
 }
@@ -90,12 +90,12 @@
   color: #a5b58d;
 }
 .panel-title h2 {
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 500;
   color: #4f653b;
 }
 .panel-title p {
-  font-size: 10px;
+  font-size: 14px;
   color: #96a782;
   margin-top: 7px;
   line-height: 1.6;
@@ -105,7 +105,7 @@
   display: inline-flex;
 }
 .legend-dot {
-  font-size: 10px;
+  font-size: 14px;
   color: #91a579;
   display: flex;
   align-items: center;
@@ -137,7 +137,7 @@
   display: none;
 }
 .chart-wrap .empty h3 {
-  font-size: 13px;
+  font-size: 16px;
 }
 .chart-loading {
   min-height: 215px;
@@ -175,14 +175,14 @@
   color: #607b46;
 }
 .donut span {
-  font-size: 9px;
+  font-size: 13px;
   color: #8fa174;
 }
 .donut-caption {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: 14px;
   color: #849c69;
   margin: 0 22px 13px;
 }
@@ -199,7 +199,7 @@
   border-radius: 2px;
 }
 .donut-caption strong {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 400;
 }
 .donut-caption.muted {
@@ -218,7 +218,7 @@
   padding-bottom: 20px;
 }
 .counter {
-  font-size: 9px;
+  font-size: 13px;
   background: #f5f8ed;
   color: #b0bf98;
   border: 1px solid #e8efda;
@@ -240,7 +240,7 @@ thead {
   border-bottom: 1px solid #edf1e5;
 }
 th {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 400;
   color: #9aaf83;
   padding: 10px 14px;
@@ -249,7 +249,7 @@ th:first-child {
   padding-left: 23px;
 }
 td {
-  font-size: 11px;
+  font-size: 14px;
   color: #829b65;
   padding: 13px 14px;
   border-bottom: 1px solid #f0f4e8;
@@ -268,7 +268,7 @@ td:last-child {
   align-items: center;
   gap: 10px;
   text-align: left;
-  font-size: 11px;
+  font-size: 14px;
   color: #69844e;
   padding: 0;
 }
@@ -277,7 +277,7 @@ td:last-child {
 }
 .table-game small {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   color: #a1b58a;
   margin-top: 5px;
 }
@@ -289,7 +289,7 @@ td:last-child {
   background: #f5e6a4;
   border-radius: 7px;
   color: #a08d48;
-  font-size: 24px;
+  font-size: 28px;
 }
 .mini-1 {
   background: #e4ddec;
@@ -307,7 +307,7 @@ td:last-child {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
+  font-size: 14px;
 }
 .table-rate > i {
   width: 36px;
@@ -329,7 +329,7 @@ td:last-child {
   align-items: center;
   gap: 9px;
   margin-bottom: 17px;
-  font-size: 8px;
+  font-size: 12px;
   color: #acbc99;
 }
 .duration-bars > div > span {
@@ -350,7 +350,7 @@ td:last-child {
 }
 .duration-bars strong {
   font-weight: 400;
-  font-size: 8px;
+  font-size: 12px;
   width: 24px;
   text-align: right;
 }
@@ -365,7 +365,7 @@ td:last-child {
   color: #b3c09a;
 }
 .insight p {
-  font-size: 9px;
+  font-size: 13px;
   line-height: 1.9;
   color: #8a9f70;
 }
@@ -379,7 +379,7 @@ td:last-child {
   display: flex;
   flex-direction: column;
   gap: 15px;
-  font-size: 10px;
+  font-size: 14px;
   color: #a9b997;
 }
 .detail-metrics strong {
@@ -395,7 +395,7 @@ td:last-child {
   padding: 16px 20px;
   border: 1px solid #e9eedc;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 14px;
   color: #8ea574;
 }
 .events-strip > span {
@@ -407,7 +407,7 @@ td:last-child {
   margin-right: 8px;
 }
 .events-strip code {
-  font-size: 9px;
+  font-size: 13px;
   color: #9db587;
 }
 .events-strip strong {
@@ -416,7 +416,7 @@ td:last-child {
 }
 .duration-bars > div,
 .duration-bars strong {
-  font-size: 9px;
+  font-size: 13px;
   color: #92a777;
 }
 @media (max-width: 1190px) {
@@ -430,7 +430,7 @@ td:last-child {
     gap: 12px;
   }
   .stat-title {
-    font-size: 9px;
+    font-size: 13px;
   }
   .stat-title > svg {
     width: 14px;
@@ -444,10 +444,10 @@ td:last-child {
     padding: 18px 16px 0;
   }
   .panel-title h2 {
-    font-size: 11px;
+    font-size: 14px;
   }
   .panel-title p {
-    font-size: 8px;
+    font-size: 12px;
   }
   .chart-wrap {
     padding: 16px 12px;
@@ -520,7 +520,7 @@ td:last-child {
     margin-top: 2px;
   }
   .panel-title h2 {
-    font-size: 13px;
+    font-size: 16px;
   }
 }
 @media (max-width: 620px) {
@@ -532,7 +532,7 @@ td:last-child {
     padding: 8px 9px;
   }
   .analytics-toolbar .select-wrap select {
-    font-size: 9px;
+    font-size: 13px;
     max-width: 150px;
   }
   .analytics-toolbar > .toolbar-spacer {
@@ -552,7 +552,7 @@ td:last-child {
     padding: 15px 13px 8px;
   }
   .stat-title {
-    font-size: 10px;
+    font-size: 14px;
   }
   .stat-title > svg {
     width: 13px;
@@ -563,7 +563,7 @@ td:last-child {
     margin: 13px 0 5px;
   }
   .stat-bottom > span {
-    font-size: 8px;
+    font-size: 12px;
   }
   .stat-bottom svg {
     width: 40px;
@@ -573,10 +573,10 @@ td:last-child {
     padding: 18px 16px 0;
   }
   .panel-title h2 {
-    font-size: 13px;
+    font-size: 16px;
   }
   .panel-title p {
-    font-size: 9px;
+    font-size: 13px;
   }
   .activity-panel .segment {
     margin-left: 16px;
@@ -607,27 +607,27 @@ td:last-child {
     gap: 15px;
   }
   th {
-    font-size: 8px;
+    font-size: 12px;
     padding: 10px;
   }
   td {
-    font-size: 9px;
+    font-size: 13px;
     padding: 13px 10px;
   }
   .table-game {
-    font-size: 9px;
+    font-size: 13px;
     gap: 8px;
   }
   .table-game small {
-    font-size: 8px;
+    font-size: 12px;
   }
   .table-game .mini-art {
     width: 27px;
     height: 29px;
-    font-size: 20px;
+    font-size: 23px;
   }
   .table-rate {
-    font-size: 8px;
+    font-size: 12px;
   }
   .table-rate > i {
     display: none;
@@ -647,14 +647,14 @@ td:last-child {
   .events-strip {
     flex-wrap: wrap;
     padding: 12px 15px;
-    font-size: 8px;
+    font-size: 12px;
     gap: 12px;
   }
   .events-strip > span:first-child {
     width: 100%;
   }
   .events-strip code {
-    font-size: 7px;
+    font-size: 11px;
   }
   .detail-metrics {
     grid-template-columns: repeat(2, 1fr);
@@ -663,11 +663,11 @@ td:last-child {
   }
   td,
   .table-game {
-    font-size: 10px;
+    font-size: 14px;
   }
 }
 @media (max-width: 800px) {
   .stat-title {
-    font-size: 10px;
+    font-size: 14px;
   }
 }

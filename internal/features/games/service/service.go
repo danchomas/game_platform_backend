@@ -38,8 +38,9 @@ type Service struct {
 	// bg — контекст приложения: фоновые сборки живут дольше HTTP-запроса.
 	bg     context.Context
 	genSem chan struct{}
-	jobs   sync.WaitGroup
-	events *broker
+	jobs     sync.WaitGroup
+	events   *broker
+	progress *progressStore
 }
 
 func NewService(bg context.Context, repo GameRepository, ag Agent, insights InsightProvider, maxConcurrent int) *Service {
@@ -53,6 +54,7 @@ func NewService(bg context.Context, repo GameRepository, ag Agent, insights Insi
 		bg:       bg,
 		genSem:   make(chan struct{}, maxConcurrent),
 		events:   newBroker(),
+		progress: newProgressStore(),
 	}
 }
 

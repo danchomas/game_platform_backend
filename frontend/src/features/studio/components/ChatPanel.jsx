@@ -53,6 +53,7 @@ export function ChatPanel({
         busy={editor.busy}
         generating={editor.generating}
         stage={editor.stage}
+        progress={editor.progress}
         plan={editor.plan}
         onApprove={editor.approve}
       />

@@ -334,6 +334,47 @@ func TestIterateGameRejectsConcurrentEdit(t *testing.T) {
 	svc.Wait()
 }
 
+func TestStatusShowsBuildProgressOnlyWhileBuilding(t *testing.T) {
+	repo := newFakeRepo()
+	ag := &fakeAgent{html: gameHTML("let x;"), block: make(chan struct{}), entered: make(chan struct{}, 1)}
+	svc := newTestService(repo, ag)
+	id := repo.seedGame("owner-1", gameHTML("let v1;"))
+	ctx := context.Background()
+
+	_, events, cancel, err := svc.Subscribe(ctx, "owner-1", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if _, err := svc.IterateGame(ctx, "owner-1", id, "сделай медленнее"); err != nil {
+		t.Fatal(err)
+	}
+	<-ag.entered
+
+	_, p, err := svc.GetStatus(ctx, "owner-1", id)
+	if err != nil || p == nil {
+		t.Fatalf("во время сборки нужен прогресс: %v %v", p, err)
+	}
+	if p.Role != "coder" || p.Chars != 1200 || p.Step != "Рисуем поле" || p.ExpectedMs != 90_000 || p.ExpectedChars != 20_000 {
+		t.Errorf("прогресс не дошёл до статуса: %+v", *p)
+	}
+	var sawProgress bool
+	for len(events) > 0 {
+		if ev := <-events; ev.Progress != nil && ev.Progress.Chars == 1200 {
+			sawProgress = true
+		}
+	}
+	if !sawProgress {
+		t.Error("прогресс должен рассылаться подписчикам SSE")
+	}
+
+	close(ag.block)
+	svc.Wait()
+	if _, p, _ := svc.GetStatus(ctx, "owner-1", id); p != nil {
+		t.Errorf("после сборки прогресса быть не должно: %+v", *p)
+	}
+}
+
 func TestIterateGameRequiresCode(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(repo, &fakeAgent{spec: snakeSpec()})

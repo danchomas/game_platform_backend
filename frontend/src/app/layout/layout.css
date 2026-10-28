@@ -3,7 +3,7 @@
   min-height: 100vh;
 }
 .sidebar {
-  width: 226px;
+  width: min(272px, 88vw);
   position: fixed;
   inset: 0 auto 0 0;
   background: #fff;
@@ -38,7 +38,7 @@ body:has(.sidebar.open) {
   align-items: center;
   gap: 10px;
   margin: 0 7px 34px;
-  font-size: 23px;
+  font-size: 26px;
   font-weight: 600;
   letter-spacing: -1px;
   line-height: 1;
@@ -49,7 +49,7 @@ body:has(.sidebar.open) {
 }
 .brand small {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: 1.65px;
   font-weight: 500;
   color: #929589;
@@ -64,7 +64,7 @@ body:has(.sidebar.open) {
   padding: 10px 8px;
   border-radius: 9px;
   text-align: left;
-  font-size: 11px;
+  font-size: 14px;
   margin: 0 0 30px;
   width: 100%;
 }
@@ -78,7 +78,7 @@ body:has(.sidebar.open) {
   height: 30px;
   border: 1px solid #e8ebdf;
   border-radius: 7px;
-  font-size: 20px;
+  font-size: 23px;
   background: #f5f5ed;
   font-weight: 500;
 }
@@ -90,7 +90,7 @@ body:has(.sidebar.open) {
 .workspace-switch small {
   display: block;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 13px;
   margin-top: 4px;
   font-weight: 400;
 }
@@ -98,7 +98,7 @@ body:has(.sidebar.open) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1.1px;
   color: #a4a69c;
   margin: 0 12px 11px;
@@ -122,7 +122,7 @@ body:has(.sidebar.open) {
   padding: 0 12px;
   border-radius: 8px;
   color: #777c6d;
-  font-size: 13px;
+  font-size: 16px;
 }
 .sidebar nav > button:hover {
   background: #f6f7f2;
@@ -138,11 +138,11 @@ body:has(.sidebar.open) {
   flex: 1;
 }
 .nav-star {
-  font-size: 19px;
+  font-size: 22px;
   color: #9da46f;
 }
 .nav-count {
-  font-size: 10px;
+  font-size: 14px;
   background: #f1f3eb;
   min-width: 20px;
   text-align: center;
@@ -158,7 +158,7 @@ body:has(.sidebar.open) {
   align-items: center;
   gap: 9px;
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 14px;
   width: 100%;
   text-align: left;
   color: #7c8272;
@@ -185,7 +185,7 @@ body:has(.sidebar.open) {
   background: #9fac8f;
 }
 .sidebar-empty {
-  font-size: 10px;
+  font-size: 14px;
   color: #a4a89b;
   padding: 0 12px;
 }
@@ -215,7 +215,7 @@ body:has(.sidebar.open) {
 }
 .sidebar-promo p {
   position: relative;
-  font-size: 16px;
+  font-size: 19px;
   letter-spacing: -0.5px;
   line-height: 1.35;
   margin: 6px 0 20px;
@@ -227,14 +227,14 @@ body:has(.sidebar.open) {
   width: 100%;
   align-items: center;
   padding: 0;
-  font-size: 10px;
+  font-size: 14px;
   color: #727b55;
 }
 .sidebar-utility {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: 14px;
   color: #7c8272;
   width: 100%;
   padding: 10px 12px;
@@ -254,7 +254,7 @@ body:has(.sidebar.open) {
   padding: 18px 2px 20px;
   width: 100%;
   text-align: left;
-  font-size: 11px;
+  font-size: 14px;
 }
 .profile-avatar {
   width: 32px;
@@ -264,7 +264,7 @@ body:has(.sidebar.open) {
   display: grid;
   place-items: center;
   position: relative;
-  font-size: 12px;
+  font-size: 15px;
 }
 .profile-avatar i {
   position: absolute;
@@ -281,7 +281,7 @@ body:has(.sidebar.open) {
 }
 .profile small {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   color: #9ba18f;
   margin-top: 5px;
 }
@@ -312,7 +312,7 @@ body:has(.sidebar.open) {
   display: flex;
   gap: 15px;
   align-items: center;
-  font-size: 10px;
+  font-size: 14px;
   color: #9da193;
   margin-right: auto;
 }
@@ -326,7 +326,7 @@ body:has(.sidebar.open) {
   gap: 19px;
 }
 .connection-status {
-  font-size: 10px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -357,7 +357,7 @@ body:has(.sidebar.open) {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 10px;
+  font-size: 14px;
   color: #848c79;
   padding: 0;
 }
@@ -370,7 +370,7 @@ body:has(.sidebar.open) {
   background: #e9eddc;
   display: grid;
   place-items: center;
-  font-size: 10px;
+  font-size: 14px;
   color: #6e785c;
 }
 .menu-toggle {
@@ -386,15 +386,15 @@ body:has(.sidebar.open) {
 }
 .sidebar-projects > button,
 .sidebar-utility {
-  font-size: 12px;
+  font-size: 15px;
 }
 .workspace-switch small,
 .profile small {
-  font-size: 10px;
+  font-size: 14px;
 }
 .breadcrumbs,
 .help-button {
-  font-size: 11px;
+  font-size: 14px;
 }
 @media (min-width: 1600px) {
   .topbar {
@@ -414,11 +414,11 @@ body:has(.sidebar.open) {
     gap: 12px;
   }
   .breadcrumbs {
-    font-size: 9px;
+    font-size: 13px;
     gap: 10px;
   }
   .help-button {
-    font-size: 9px;
+    font-size: 13px;
   }
 }
 @media (max-width: 800px) {
@@ -427,7 +427,7 @@ body:has(.sidebar.open) {
     padding: 0 19px;
   }
   .breadcrumbs {
-    font-size: 8px;
+    font-size: 12px;
     gap: 8px;
   }
   .breadcrumbs > span:first-child {
@@ -452,7 +452,7 @@ body:has(.sidebar.open) {
     height: 60px;
   }
   .breadcrumbs {
-    font-size: 10px;
+    font-size: 14px;
     margin-right: auto;
   }
   .topbar-right {
@@ -464,10 +464,10 @@ body:has(.sidebar.open) {
   .top-avatar {
     width: 26px;
     height: 26px;
-    font-size: 9px;
+    font-size: 13px;
   }
   .connection-status {
-    font-size: 8px;
+    font-size: 12px;
     padding: 6px;
   }
   .connection-status > svg {

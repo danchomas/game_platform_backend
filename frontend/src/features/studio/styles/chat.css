@@ -37,13 +37,13 @@
   color: #898951;
 }
 .chat-header > div > span:last-child {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 500;
   color: #4e5d40;
 }
 .chat-header small {
   display: block;
-  font-size: 10px;
+  font-size: 14px;
   color: #8e9c7f;
   margin-top: 5px;
   font-weight: 400;
@@ -60,7 +60,7 @@
   margin-bottom: 25px;
   display: flex;
   gap: 9px;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.85;
 }
 .message.user {
@@ -80,7 +80,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: #737f66;
-  font-size: 12px;
+  font-size: 15px;
 }
 .message.user .message-body {
   color: #58694a;
@@ -101,7 +101,7 @@
   border-radius: 7px;
 }
 .message-author {
-  font-size: 10px;
+  font-size: 14px;
   color: #64764f;
   display: flex;
   align-items: center;
@@ -110,7 +110,7 @@
   font-weight: 500;
 }
 .message-author small {
-  font-size: 8px;
+  font-size: 12px;
   color: #a5ac94;
   font-weight: 400;
   border: 1px solid #ebeee3;
@@ -127,7 +127,7 @@
   border-radius: 8px;
   margin-top: 13px;
   padding: 11px 10px;
-  font-size: 10px;
+  font-size: 14px;
   color: #6c7f56;
   line-height: 1.4;
 }
@@ -140,7 +140,7 @@
   background: #fcfcf7;
   border-radius: 8px;
   padding: 12px;
-  font-size: 10px;
+  font-size: 14px;
   color: #6c7f56;
 }
 .plan-card-title {
@@ -148,7 +148,7 @@
 }
 .plan-card-title small {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 400;
   color: #93a47e;
   margin-top: 4px;
@@ -160,7 +160,7 @@
   margin: 10px 0 12px;
 }
 .plan-facts dt {
-  font-size: 8px;
+  font-size: 12px;
   color: #a2ae8f;
 }
 .plan-facts dd {
@@ -175,7 +175,7 @@
   padding: 8px 12px;
   background: #f5d76e;
   color: #4d4a2a;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -185,7 +185,7 @@
 }
 .message-result small {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   color: #93a47e;
   margin-top: 5px;
 }
@@ -193,13 +193,13 @@
   padding: 14px 8px;
 }
 .welcome h3 {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.5px;
   margin-bottom: 12px;
 }
 .welcome p {
-  font-size: 12px;
+  font-size: 15px;
   line-height: 1.9;
   color: #8a947d;
 }
@@ -208,7 +208,7 @@
   padding: 13px 15px;
   border: 1px solid #eaeedf;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 14px;
   color: #91997e;
   line-height: 1.7;
   background: #fbfcf7;
@@ -227,7 +227,7 @@
   border: 1px solid #e9eddf;
   border-radius: 6px;
   padding: 5px 7px;
-  font-size: 9px;
+  font-size: 13px;
   color: #84976e;
   background: #fff;
   white-space: nowrap;
@@ -252,7 +252,7 @@
   box-shadow: 0 0 0 3px #bac58814;
 }
 .composer textarea {
-  font-size: 12px;
+  font-size: 15px;
   line-height: 1.7;
   display: block;
   resize: none;
@@ -275,7 +275,7 @@
 .audience-select {
   display: flex;
   align-items: center;
-  font-size: 8px;
+  font-size: 12px;
   color: #9aa28d;
   gap: 5px;
   flex: 1;
@@ -286,7 +286,7 @@
 }
 .audience-select select {
   padding: 3px 0;
-  font-size: 8px;
+  font-size: 12px;
   appearance: none;
   border: 0;
   background: none;
@@ -324,7 +324,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 8px;
+  font-size: 12px;
   margin: 9px 3px 0;
   color: #9da98e;
 }
@@ -355,12 +355,54 @@
 .typing i:nth-child(3) {
   animation-delay: 0.4s;
 }
+.gen-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #e6ebdb;
+  border-radius: 9px;
+  background: #fbfcf7;
+  max-width: 420px;
+}
+.gen-live-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 14px;
+}
+.gen-live-head strong {
+  font-weight: 500;
+  color: #5d6f45;
+}
+.gen-live-head span {
+  color: #93a07c;
+  font-variant-numeric: tabular-nums;
+}
+.gen-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #edf0e4;
+  overflow: hidden;
+}
+.gen-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d8c25a, #ffdc3c);
+  transition: width 0.8s ease-out;
+}
+.gen-live small {
+  font-size: 12px;
+  color: #a0ab8c;
+}
 .gen-steps {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 15px;
-  font-size: 9px;
+  font-size: 13px;
   color: #a2ae8f;
 }
 .gen-steps > span {
@@ -386,12 +428,12 @@
 }
 .audience-select,
 .audience-select select {
-  font-size: 9px;
+  font-size: 13px;
   color: #80946a;
 }
 @media (min-width: 1600px) {
   .message-body {
-    font-size: 12px;
+    font-size: 15px;
   }
   .chat-messages {
     padding: 25px;
@@ -406,7 +448,7 @@
     height: 72px;
   }
   .suggestion-list button {
-    font-size: 9px;
+    font-size: 13px;
   }
 }
 @media (max-width: 1000px) {
@@ -420,15 +462,15 @@
     padding: 10px;
   }
   .suggestion-list button {
-    font-size: 7px;
+    font-size: 11px;
     padding: 5px;
   }
   .audience-select {
     gap: 4px;
-    font-size: 7px;
+    font-size: 11px;
   }
   .audience-select select {
-    font-size: 7px;
+    font-size: 11px;
     max-width: 95px;
   }
   .audience-select > span {
@@ -444,31 +486,31 @@
   }
   .composer textarea {
     min-height: 55px;
-    font-size: 12px;
+    font-size: 15px;
   }
   .message-body {
-    font-size: 12px;
+    font-size: 15px;
   }
   .message-author {
-    font-size: 10px;
+    font-size: 14px;
   }
   .composer-area {
     padding: 13px;
   }
   .composer-note {
-    font-size: 8px;
+    font-size: 12px;
   }
   .suggestion-list button {
-    font-size: 8px;
+    font-size: 12px;
   }
   .audience-select > span {
     display: inline;
   }
   .audience-select {
-    font-size: 9px;
+    font-size: 13px;
   }
   .audience-select select {
-    font-size: 9px;
+    font-size: 13px;
     max-width: 150px;
   }
 }
@@ -483,9 +525,9 @@
     padding: 13px 15px;
   }
   .composer-note {
-    font-size: 7px;
+    font-size: 11px;
   }
   .suggestion-list button {
-    font-size: 8px;
+    font-size: 12px;
   }
 }

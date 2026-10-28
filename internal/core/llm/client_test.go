@@ -239,3 +239,73 @@ func TestUsageReportsReasoningTokens(t *testing.T) {
 		t.Fatalf("reasoning_tokens не разобран: %+v, %v", resp.Usage, err)
 	}
 }
+
+func TestCompleteStreamsDeltas(t *testing.T) {
+	var gotReq chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotReq)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, ev := range []string{
+			": OPENROUTER PROCESSING",
+			`data: {"model":"m/real","choices":[{"delta":{"content":"<game>при"}}]}`,
+			`data: {"choices":[{"delta":{"content":"вет</game>"},"finish_reason":"stop"}]}`,
+			`data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"cost":0.002,"completion_tokens_details":{"reasoning_tokens":2}}}`,
+			"data: [DONE]",
+		} {
+			_, _ = io.WriteString(w, ev+"\n\n")
+		}
+	}))
+	defer srv.Close()
+
+	var deltas []string
+	resp, err := NewClient("k", "m", srv.URL, time.Second).Complete(context.Background(),
+		Request{Messages: []Msg{{Role: "user", Content: "x"}}, OnDelta: func(d string) { deltas = append(deltas, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotReq.Stream {
+		t.Error("с OnDelta запрос должен быть потоковым")
+	}
+	if resp.Text != "<game>привет</game>" || strings.Join(deltas, "|") != "<game>при|вет</game>" {
+		t.Errorf("текст %q, куски %q", resp.Text, deltas)
+	}
+	if resp.FinishReason != "stop" || resp.Model != "m/real" || resp.Usage.CostUSD != 0.002 || resp.Usage.ReasoningTokens != 2 {
+		t.Errorf("метаданные потока потеряны: %+v", resp)
+	}
+}
+
+func TestStreamGatewayErrorIsRetriedBeforeAnyDelta(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":{"message":"busy"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	var got strings.Builder
+	resp, err := NewClient("k", "m", srv.URL, time.Second).Complete(context.Background(),
+		Request{Messages: []Msg{{Role: "user", Content: "x"}}, OnDelta: func(d string) { got.WriteString(d) }})
+	if err != nil || resp.Text != "ok" || got.String() != "ok" || calls != 2 {
+		t.Fatalf("calls=%d text=%q deltas=%q err=%v", calls, resp.Text, got.String(), err)
+	}
+}
+
+func TestStreamErrorMidwayIsNotRetried(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\ndata: {\"error\":{\"message\":\"upstream died\"}}\n\n")
+	}))
+	defer srv.Close()
+
+	_, err := NewClient("k", "m", srv.URL, time.Second).Complete(context.Background(),
+		Request{Messages: []Msg{{Role: "user", Content: "x"}}, OnDelta: func(string) {}})
+	if !errors.Is(err, apperr.ErrLLMUnavailable) || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}

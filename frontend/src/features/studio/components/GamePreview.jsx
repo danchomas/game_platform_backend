@@ -2,7 +2,10 @@ import { useEffect, useState, useMemo } from 'react';
 import { Spinner } from '../../../shared/ui/Spinner';
 import { EmptyState } from '../../../shared/ui/EmptyState';
 import { previewHTML } from '../previewHTML';
+import { describeProgress } from '../../games/pipelineStatus';
+import { useNow } from '../hooks/useNow';
 import { PreviewToolbar } from './PreviewToolbar';
+import { PhoneFrame, phoneScreen } from './PhoneFrame';
 import { PreviewFooter } from './PreviewFooter';
 import { GameSettings } from './GameSettings';
 import { VersionHistory } from './VersionHistory';
@@ -16,13 +19,19 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
     setOptions,
     busy,
     generating,
+    stage,
+    progress,
     exportGame: onExport,
     restore: onRestore,
   } = editor;
+  const now = useNow(generating && Boolean(progress));
+  const live = generating ? describeProgress(stage, progress, now) : null;
   const [view, setView] = useState('preview');
   const [reload, setReload] = useState(0);
   const [panel, setPanel] = useState('');
   const [expanded, setExpanded] = useState(false);
+  const [orientation, setOrientation] = useState('portrait');
+  const screen = phoneScreen(orientation);
   const safeHTML = useMemo(() => previewHTML(html || ''), [html]);
   useEffect(() => {
     setView('preview');
@@ -46,11 +55,15 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
         expanded={expanded}
         setExpanded={setExpanded}
         onReload={() => setReload((value) => value + 1)}
+        orientation={orientation}
+        onRotate={() =>
+          setOrientation((value) => (value === 'portrait' ? 'landscape' : 'portrait'))
+        }
       />
       <div className={`preview-stage ${view === 'code' ? 'code-stage' : ''}`}>
         {html ? (
           view === 'preview' ? (
-            <div className="iframe-shell">
+            <PhoneFrame orientation={orientation}>
               <iframe
                 key={`${game?.id}-${reload}`}
                 srcDoc={safeHTML}
@@ -59,7 +72,7 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
                 allow="autoplay"
                 data-preview="game"
               />
-            </div>
+            </PhoneFrame>
           ) : (
             <pre className="code-view" tabIndex={0}>
               <code>{html}</code>
@@ -74,9 +87,18 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
         {busy && (
           <div className="preview-busy">
             <Spinner />
-            <span>{generating ? 'Генерируем новую версию…' : 'Загружаем игру…'}</span>
+            <span>
+              {generating ? live?.activity || 'Генерируем новую версию' : 'Загружаем игру'}…
+            </span>
+            {live?.percent != null && (
+              <div className="gen-bar preview-bar" aria-hidden="true">
+                <i style={{ width: `${live.percent}%` }} />
+              </div>
+            )}
             <small>
-              {generating ? 'Это может занять до нескольких минут' : 'Подготавливаем предпросмотр'}
+              {generating
+                ? live?.time || 'Это может занять до нескольких минут'
+                : 'Подготавливаем предпросмотр'}
             </small>
           </div>
         )}
@@ -91,7 +113,7 @@ export function GamePreview({ editor, demo, onEmbed, onSelectPrompt }) {
             : 'Готово к вашей идее'}
         </span>
         <span>
-          Адаптивный экран
+          Телефон · {screen.width}×{screen.height}
           <span className="info-divider" />{' '}
           {html
             ? `${new Blob([html]).size / 1024 < 1 ? '< 1' : Math.round(new Blob([html]).size / 1024)} КБ`
