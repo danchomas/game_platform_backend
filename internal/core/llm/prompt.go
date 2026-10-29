@@ -38,7 +38,7 @@ Return ONLY one JSON object (no markdown, no prose) with this shape:
  "assets": [{"name": "player", "kind": "sprite|background|icon|effect", "description": "how it looks; it will be drawn procedurally on canvas or as inline SVG"}],
  "sounds": ["click","coin","jump","hit","win","lose","powerup","move","pop","error"],
  "events": ["level_up","bonus_taken","lose_reason"],
- "summary": "the plan for the user in the request language: 4-7 short lines starting with '• ' (idea, how to control, how to win, look & feel). Friendly, no jargon."
+ "summary": "ONE string (not a list): the plan for the user in the request language, 4-7 short lines starting with '• ' separated by \n (idea, how to control, how to win, look & feel). Friendly, no jargon."
 }
 
 DESIGN RULES:
